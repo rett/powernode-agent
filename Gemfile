@@ -1,0 +1,7 @@
+source 'http://rubygems.org'
+gem 'aws'
+gem 'rest-client'
+gem 'net-ssh'
+gem 'net-scp'
+gem 'i18n'
+gem 'beetle'
