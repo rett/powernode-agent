@@ -30,18 +30,19 @@ def self.node_trigger_update(params)
   node = params['node']
   node_instances = params['node_instances']
   node_module_categories = params['node_module_categories']
-  puts "Triggering update on #{node['identifier']}..."
 
-  system("ssh-keygen -R #{node['public_address']} 2>/dev/null")
-
-  node_instances.each do |node_instance|
-    session = Net::SSH.start(node_instance['ip_public'], params['admin_user'], :key_data => node['key'])
-    node_module_categories.each do |c|
-      puts session.exec!("sudo ipn -uv #{c} all")
+  if node['enabled'] == true
+    puts "Triggering update on #{node['identifier']}..."
+    system("ssh-keygen -R #{node['public_address']} 2>/dev/null")
+  
+    node_instances.each do |node_instance|
+      session = Net::SSH.start(node_instance['ip_public'], params['admin_user'], :key_data => node['key'])
+      node_module_categories.each do |c|
+        puts session.exec!("sudo ipn -uv #{c} all")
+      end
     end
+    puts "Trigger complete."
   end
-
-  puts "Trigger complete."
 end
 
 def self.node_update_status(params)
@@ -58,15 +59,22 @@ def self.node_update_status(params)
                       node_platform['aws_secret_key'],
                       {:endpoint_url => node_platform['aws_url']})
 
-  if instance_count_difference > 0
-    puts "Not enough instances, launching #{instance_count_difference} instances..."
-    launch_instances(node, node_template, instance_count_difference)
-  elsif instance_count_difference < 0
-    instance_count_difference *= -1
-    puts "Too many instances, destroying #{instance_count_difference} instances..."
-    destroy_instances(node, node_instances, instance_count_difference)
+  if node['enabled'] == true
+    if instance_count_difference > 0
+      puts "Not enough instances, launching #{instance_count_difference} instances..."
+      launch_instances(node, node_template, instance_count_difference)
+    elsif instance_count_difference < 0
+      instance_count_difference *= -1
+      puts "Too many instances, destroying #{instance_count_difference} instances..."
+      destroy_instances(node, node_instances, instance_count_difference)
+    else
+      puts "Correct number of instances running."
+    end
   else
-    puts "Correct number of instances running."
+    if node_instances.count > 0
+      puts "Node disabled, destroying #{node_instances.count} instances..."
+      destroy_instances(node, node_instances, node_instances.count)
+    end
   end
 
   # Todo: Update node status.
