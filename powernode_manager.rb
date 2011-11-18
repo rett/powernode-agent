@@ -1,9 +1,7 @@
 require 'aws'
 require 'benchmark'
-require 'daemons'
-require 'logger'
 require 'rubygems'
-require 'bundler/setup'
+require 'bundler'
 require 'restclient'
 require 'beetle'
 require 'json'
@@ -23,7 +21,6 @@ $beetle.register_queue(:powernode)
 $beetle.register_message(:powernode)
 
 $beetle.register_handler(:powernode, :exceptions => 1, :delay => 0) do |message|
-  puts "#{message.data}"
   params = JSON.parse(message.data)
   operation = params["operation"]
   fork { self.send(operation, params) } if self.respond_to?(operation)
