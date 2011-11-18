@@ -1,2 +1,4 @@
 .idea
 Gemfile.lock
+monitor/*.log
+monitor/*.pid

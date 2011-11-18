@@ -1,5 +1,7 @@
 require 'aws'
 require 'benchmark'
+require 'daemons'
+require 'logger'
 require 'rubygems'
 require 'bundler/setup'
 require 'restclient'
@@ -24,7 +26,6 @@ $beetle.register_handler(:powernode, :exceptions => 1, :delay => 0) do |message|
   puts "#{message.data}"
   params = JSON.parse(message.data)
   operation = params["operation"]
-
   fork { self.send(operation, params) } if self.respond_to?(operation)
 end
 
@@ -39,7 +40,7 @@ def self.node_trigger_update(params)
     node_instances.each do |node_instance|
       session = Net::SSH.start(node_instance['ip_private'], params['admin_user'], :key_data => node['key'], :paranoid => false)
       node_module_categories.each do |c|
-        puts session.exec!("sudo ipn -uv #{c} all")
+        session.exec!("sudo ipn -uv #{c} all")
       end
     end
     puts "Trigger complete."
@@ -83,16 +84,13 @@ def self.node_update_status(params)
 end
 
 def self.node_module_commit(params)
-  # Todo: Fetch files in module spec, package into module, upload to parent.
-
   node = params['node']
   node_instance = params['node_instance']
-  #node_module = params['node_module']
   node_module_category = params['node_module_category']
   node_module_identifier = params['node_module_identifier']
   node_module_spec = params['node_module_spec']
 
-  if node_instance['status'] == "active"
+  if node_instance['state'] == "active"
     puts "Commiting module #{node_module_identifier} from node #{node['identifier']}..."
 
     node_module_resource_path = "#{node['parent']}/manage/modules"
@@ -234,6 +232,3 @@ $beetle.listen do
     puts "Stopped Powernode Server."
   end
 end
-
-
-
