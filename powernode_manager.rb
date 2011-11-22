@@ -27,6 +27,7 @@ $beetle.register_handler(:powernode, :exceptions => 1, :delay => 0) do |message|
 end
 
 def self.node_trigger_update(params)
+  admin_user = params['admin_user']
   node = params['node']
   node_instances = params['node_instances']
   node_module_categories = params['node_module_categories']
@@ -35,7 +36,7 @@ def self.node_trigger_update(params)
     puts "Triggering update on #{node['identifier']}..."
   
     node_instances.each do |node_instance|
-      session = Net::SSH.start(node_instance['ip_private'], params['admin_user'], :key_data => node['key'], :paranoid => false)
+      session = Net::SSH.start(node_instance['ip_private'], admin_user, :key_data => node['key'], :paranoid => false)
       node_module_categories.each do |c|
         session.exec!("sudo ipn -uv #{c} all")
       end
@@ -45,34 +46,35 @@ def self.node_trigger_update(params)
 end
 
 def self.node_update_status(params)
+  aws_access_key = params['aws_access_key']
+  aws_secret_key = params['aws_secret_key']
+  aws_url = params['aws_url']
   node = params['node']
   node_instances = params['node_instances']
-  node_platform = params['node_platform']
   node_template = params['node_template']
+  node_platform_url = params['node_platform_url']
 
-  instance_count_difference = node['instances'] - node_instances.count
+  instances = node['instances'] - node_instances.count
 
-  puts "Instance count difference: #{instance_count_difference}"
+  puts "Instance count difference: #{instances}"
 
-  @ec2 = Aws::Ec2.new(node_platform['aws_access_key'],
-                      node_platform['aws_secret_key'],
-                      {:endpoint_url => node_platform['aws_url']})
+  @ec2 = Aws::Ec2.new(aws_access_key, aws_secret_key, {:endpoint_url => aws_url})
 
   if node['enabled'] == true
-    if instance_count_difference > 0
-      puts "Not enough instances, launching #{instance_count_difference} instances..."
-      launch_instances(node, node_template, instance_count_difference)
-    elsif instance_count_difference < 0
-      instance_count_difference *= -1
-      puts "Too many instances, destroying #{instance_count_difference} instances..."
-      destroy_instances(node, node_instances, instance_count_difference)
+    if instances > 0
+      puts "Not enough instances, launching #{instances} instances..."
+      launch_instances(node, node_template, node_platform_url, instances)
+    elsif instances < 0
+      instances *= -1
+      puts "Too many instances, destroying #{instances} instances..."
+      destroy_instances(node, node_instances, node_platform_url, instances)
     else
       puts "Correct number of instances running."
     end
   else
     if node_instances.count > 0
       puts "Node disabled, destroying #{node_instances.count} instances..."
-      destroy_instances(node, node_instances, node_instances.count)
+      destroy_instances(node, node_instances, node_platform_url, node_instances.count)
     end
   end
 
@@ -86,11 +88,12 @@ def self.node_module_commit(params)
   node_module_category = params['node_module_category']
   node_module_identifier = params['node_module_identifier']
   node_module_spec = params['node_module_spec']
+  node_platform_url = params['node_platform_url']
 
   if node_instance['state'] == "active"
     puts "Commiting module #{node_module_identifier} from node #{node['identifier']}..."
 
-    node_module_resource_path = "#{node['parent']}/manage/modules"
+    node_module_resource_path = "#{node_platform_url}/manage/modules"
     node_module_resource = RestClient::Resource.new(node_module_resource_path, node['identifier'], node['passphrase'])
 
     tmp_dir = Dir.mktmpdir
@@ -156,9 +159,9 @@ def check_instances(node)
   puts "Checking instances for #{node['identifier']}"
 end
 
-def destroy_instances(node, node_instances, count = 1)
+def destroy_instances(node, node_instances, node_platform_url, count = 1)
   puts "Destroying #{count} instances for #{node['identifier']}..."
-  node_resource_path = "#{node['parent']}/manage/node"
+  node_resource_path = "#{node_platform_url}/manage/node"
   node_resource = RestClient::Resource.new(node_resource_path, node['identifier'], node['passphrase'])
   puts "Node instances: #{node_instances}"
   count.times do |n|
@@ -172,13 +175,13 @@ def destroy_instances(node, node_instances, count = 1)
   end
 end
 
-def launch_instances(node, node_template, count = 1)
+def launch_instances(node, node_template, node_platform_url, count = 1)
   puts "Loading key for Node ID #{node['id']}..."
   keypair_name = "node-#{node['id']}"
   keys = @ec2.describe_key_pairs([keypair_name])
   puts "Keys: #{keys}"
 
-  node_resource_path = "#{node['parent']}/manage/node"
+  node_resource_path = "#{node_platform_url}/manage/node"
   node_resource = RestClient::Resource.new(node_resource_path, node['identifier'], node['passphrase'])
 
   if !keys[0].nil? && node['key']
@@ -201,7 +204,7 @@ def launch_instances(node, node_template, count = 1)
 
   user_data = <<END
 #!/bin/sh
-PARENT=#{node['parent']}
+PARENT=#{node_platform_url}
 IDENTIFIER=#{node['identifier']}
 PASSPHRASE=#{node['password']}
 END
