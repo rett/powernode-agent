@@ -1,4 +1,6 @@
 .idea
+*.save
+config.yml
 Gemfile.lock
 monitor/*.log
 monitor/*.pid

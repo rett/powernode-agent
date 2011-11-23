@@ -9,11 +9,13 @@ require 'net/ssh'
 require 'net/sftp'
 require 'tmpdir'
 
+APP_CONFIG = YAML.load_file(File.join("config.yml"))
+
 Beetle.config do |config|
   config.logger.level = Logger::DEBUG
-  config.servers = "192.168.1.2:5672"
-  config.redis_server = "192.168.1.2:6379"
-  config.redis_servers = "192.168.1.2:6379"
+  config.servers = APP_CONFIG['beetle_servers']
+  config.redis_server = APP_CONFIG['redis_server']
+  config.redis_servers = APP_CONFIG['redis_servers']
 end
 
 $beetle = Beetle::Client.new
@@ -27,16 +29,23 @@ $beetle.register_handler(:powernode, :exceptions => 1, :delay => 0) do |message|
 end
 
 def self.node_trigger_update(params)
-  admin_user = params['admin_user']
   node = params['node']
-  node_instances = params['node_instances']
-  node_module_categories = params['node_module_categories']
+  node_resource = RestClient::Resource.new(APP_CONFIG['node_url'],
+                                           node['identifier'],
+                                           node['passphrase'])
+  node_details = JSON.parse(node_resource.get(:accept => :json))
+  node_instances = node_details['node_instances']
+  node_module_categories = node_details['node_module_categories']
+  node_template = node_details['node_template']
 
   if node['enabled'] == true
     puts "Triggering update on #{node['identifier']}..."
   
     node_instances.each do |node_instance|
-      session = Net::SSH.start(node_instance['ip_private'], admin_user, :key_data => node['key'], :paranoid => false)
+      session = Net::SSH.start(node_instance['ip_private'],
+                               node_template['admin_user'],
+                               :key_data => node['key'],
+                               :paranoid => false)
       node_module_categories.each do |c|
         session.exec!("sudo ipn -uv #{c} all")
       end
@@ -46,39 +55,53 @@ def self.node_trigger_update(params)
 end
 
 def self.node_update_status(params)
-  aws_access_key = params['aws_access_key']
-  aws_secret_key = params['aws_secret_key']
-  aws_url = params['aws_url']
   node = params['node']
-  node_instances = params['node_instances']
-  node_template = params['node_template']
-  node_platform_url = params['node_platform_url']
+  node_resource = RestClient::Resource.new(APP_CONFIG['node_url'],
+                                           node['identifier'],
+                                           node['passphrase'])
 
-  instances = node['instances'] - node_instances.count
+  node_details = JSON.parse(node_resource.get(:accept => :json))
+  node_instances = node_details['node_instances']
+  node_platform = node_details['node_platform']
+  node_template = node_details['node_template']
+  instances = node['instances'] - node_details['node_instances'].count
 
-  puts "Instance count difference: #{instances}"
-
-  @ec2 = Aws::Ec2.new(aws_access_key, aws_secret_key, {:endpoint_url => aws_url})
+  @ec2 = Aws::Ec2.new(node_platform['aws_access_key'],
+                      node_platform['aws_secret_key'],
+                      {:endpoint_url => node_platform['aws_url']})
 
   if node['enabled'] == true
     if instances > 0
       puts "Not enough instances, launching #{instances} instances..."
-      launch_instances(node, node_template, node_platform_url, instances)
+      launch_instances(node, node_template, node_platform, instances)
     elsif instances < 0
       instances *= -1
       puts "Too many instances, destroying #{instances} instances..."
-      destroy_instances(node, node_instances, node_platform_url, instances)
+      destroy_instances(node, node_instances, node_platform, instances)
     else
       puts "Correct number of instances running."
     end
   else
     if node_instances.count > 0
       puts "Node disabled, destroying #{node_instances.count} instances..."
-      destroy_instances(node, node_instances, node_platform_url, node_instances.count)
+      destroy_instances(node, node_instances, node_platform, node_instances.count)
     end
   end
 
   # Todo: Update node status.
+
+  node_instances.each do |node_instance|
+    aws_instance = @ec2.describe_instances([node_instance['aws_instance']])[0]
+    puts "AWS  instance: #{aws_instance}"
+    puts "Node instance: #{node_instance}"
+
+    begin
+      node_resource.post(:accept => :json, :aws_instance => aws_instance, :operation => "update")
+    rescue
+    end
+
+  end
+
   puts "Status update complete."
 end
 
@@ -88,13 +111,14 @@ def self.node_module_commit(params)
   node_module_category = params['node_module_category']
   node_module_identifier = params['node_module_identifier']
   node_module_spec = params['node_module_spec']
-  node_platform_url = params['node_platform_url']
+  node_platform = params['node_platform']
 
   if node_instance['state'] == "active"
     puts "Commiting module #{node_module_identifier} from node #{node['identifier']}..."
 
-    node_module_resource_path = "#{node_platform_url}/manage/modules"
-    node_module_resource = RestClient::Resource.new(node_module_resource_path, node['identifier'], node['passphrase'])
+    node_module_resource = RestClient::Resource.new(APP_CONFIG['module_url'],
+                                                    node['identifier'],
+                                                    node['passphrase'])
 
     tmp_dir = Dir.mktmpdir
     FileUtils.chmod(0755, tmp_dir)  
@@ -159,30 +183,33 @@ def check_instances(node)
   puts "Checking instances for #{node['identifier']}"
 end
 
-def destroy_instances(node, node_instances, node_platform_url, count = 1)
+def destroy_instances(node, node_instances, node_platform, count = 1)
   puts "Destroying #{count} instances for #{node['identifier']}..."
-  node_resource_path = "#{node_platform_url}/manage/node"
-  node_resource = RestClient::Resource.new(node_resource_path, node['identifier'], node['passphrase'])
+  node_resource = RestClient::Resource.new(APP_CONFIG['node_url'],
+                                           node['identifier'],
+                                           node['passphrase'])
   puts "Node instances: #{node_instances}"
   count.times do |n|
     node_instance = node_instances.reverse[n]['aws_instance']
     puts "Node Instance: #{node_instances}"
     unless count < node['instances'] && node_instance['primary'] == false
-      @ec2.terminate_instances([node_instance])
-      node_resource.post(:node_instance => node_instance, :destroy => true, :accept => :json)
+      begin
+        @ec2.terminate_instances([node_instance])
+      rescue
+      end
+      node_resource.post(:accept => :json, :node_instance => node_instance, :operation => "delete")
     else
     end
   end
 end
 
-def launch_instances(node, node_template, node_platform_url, count = 1)
+def launch_instances(node, node_template, node_platform, count = 1)
   puts "Loading key for Node ID #{node['id']}..."
   keypair_name = "node-#{node['id']}"
   keys = @ec2.describe_key_pairs([keypair_name])
-  puts "Keys: #{keys}"
-
-  node_resource_path = "#{node_platform_url}/manage/node"
-  node_resource = RestClient::Resource.new(node_resource_path, node['identifier'], node['passphrase'])
+  node_resource = RestClient::Resource.new(APP_CONFIG['node_url'],
+                                           node['identifier'],
+                                           node['passphrase'])
 
   if !keys[0].nil? && node['key']
     key = keys[0]
@@ -204,7 +231,7 @@ def launch_instances(node, node_template, node_platform_url, count = 1)
 
   user_data = <<END
 #!/bin/sh
-PARENT=#{node_platform_url}
+PARENT=#{node_platform['url']}
 IDENTIFIER=#{node['identifier']}
 PASSPHRASE=#{node['password']}
 END
@@ -212,16 +239,16 @@ END
   puts "Launching #{count} instances for #{node['identifier']}..."
   count.times do
     begin
-      node_instance = @ec2.launch_instances(node_template['aws_image'], :kernel_id => node_template['aws_kernel'],
-                                                                        :ramdisk_id => node_template['aws_ramdisk'],
-                                                                        :aws_availability_zone => node_template['aws_availability_zone'],
-                                                                        :instance_type => node_template['aws_instance_type'],
-                                                                        :key_name => keypair_name,
-                                                                        :user_data => user_data)
+      aws_instance = @ec2.launch_instances(node_template['aws_image'], :kernel_id => node_template['aws_kernel'],
+                                                                       :ramdisk_id => node_template['aws_ramdisk'],
+                                                                       :aws_availability_zone => node_template['aws_availability_zone'],
+                                                                       :instance_type => node_template['aws_instance_type'],
+                                                                       :key_name => keypair_name,
+                                                                       :user_data => user_data)
     rescue
 
     end
-    node_resource.post(:node_instance => node_instance) if node_instance
+    node_resource.post(:aws_instance => aws_instance) if aws_instance
   end
 end
 
