@@ -9,7 +9,7 @@ require 'net/ssh'
 require 'net/sftp'
 require 'tmpdir'
 
-APP_CONFIG = YAML.load_file(File.join("config.yml"))
+APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), "config.yml"))
 
 Beetle.config do |config|
   config.logger.level = Logger::DEBUG
@@ -33,24 +33,40 @@ def self.node_trigger_update(params)
   node_resource = RestClient::Resource.new(APP_CONFIG['node_url'],
                                            node['identifier'],
                                            node['passphrase'])
-  node_details = JSON.parse(node_resource.get(:accept => :json))
-  node_instances = node_details['node_instances']
-  node_module_categories = node_details['node_module_categories']
-  node_template = node_details['node_template']
+  node_resource.post(:accept => :json,
+                     :trigger_update => nil,
+                     :operation => "update")
+  node_response = JSON.parse(node_resource.get(:accept => :json))
+
+  node_instances = node_response['node_instances']
+  node_module_categories = node_response['node_module_categories']
+  node_template = node_response['node_template']
 
   if node['enabled'] == true
-    puts "Triggering update on #{node['identifier']}..."
-  
     node_instances.each do |node_instance|
-      session = Net::SSH.start(node_instance['ip_private'],
-                               node_template['admin_user'],
-                               :key_data => node['key'],
-                               :paranoid => false)
-      node_module_categories.each do |c|
-        session.exec!("sudo ipn -uv #{c} all")
+      if node_instance['last_update'].nil? || Time.parse(node_instance['last_update']) < APP_CONFIG['poll_interval'].seconds.ago
+        puts "Triggering update on instance: #{node_instance['aws_instance']}..."
+        node_instance['last_update'] = Time.now
+        node_resource['instance'].post(:accept => :json,
+                                       :node_instance => node_instance,
+                                       :operation => "update")
+        begin
+        session = Net::SSH.start(node_instance['ip_private'],
+                                 node_template['admin_user'],
+                                 :key_data => node['key'],
+                                 :paranoid => false)
+        rescue
+        end
+        if session
+          node_module_categories.each do |c|
+            begin
+              session.exec!("sudo ipn -auv #{c} all")
+            rescue
+            end
+          end
+        end
       end
     end
-    puts "Trigger complete."
   end
 end
 
@@ -60,11 +76,11 @@ def self.node_update_status(params)
                                            node['identifier'],
                                            node['passphrase'])
 
-  node_details = JSON.parse(node_resource.get(:accept => :json))
-  node_instances = node_details['node_instances']
-  node_platform = node_details['node_platform']
-  node_template = node_details['node_template']
-  instances = node['instances'] - node_details['node_instances'].count
+  node_response = JSON.parse(node_resource.get(:accept => :json))
+  node_instances = node_response['node_instances']
+  node_platform = node_response['node_platform']
+  node_template = node_response['node_template']
+  instances = node['instances'] - node_response['node_instances'].count
 
   @ec2 = Aws::Ec2.new(node_platform['aws_access_key'],
                       node_platform['aws_secret_key'],
@@ -92,14 +108,12 @@ def self.node_update_status(params)
 
   node_instances.each do |node_instance|
     aws_instance = @ec2.describe_instances([node_instance['aws_instance']])[0]
-    puts "AWS  instance: #{aws_instance}"
-    puts "Node instance: #{node_instance}"
-
     begin
-      node_resource.post(:accept => :json, :aws_instance => aws_instance, :operation => "update")
+      node_resource['instance'].post(:accept => :json,
+                                     :aws_instance => aws_instance,
+                                     :operation => "update")
     rescue
     end
-
   end
 
   puts "Status update complete."
@@ -159,10 +173,11 @@ def self.node_module_commit(params)
     tmp_module = Tempfile.new("module-#{node['id']}")
     tmp_module.close
     system("mksquashfs #{tmp_dir} #{tmp_module.path} -noappend")
-    node_module_resource["#{node_module_category['name']}/#{node_module_identifier}"].post(:data => File.open(tmp_module),
+    node_module_resource["#{node_module_category['name']}/#{node_module_identifier}"].post(:accept => :json,
+                                                            :data => File.open(tmp_module),
                                                             :multipart => true,
-                                                            :content_type => "application/octet-stream",
-                                                            :accept => :json) do |response, request, result, &block|
+                                                            :content_type => "application/octet-stream"
+                                                            ) do |response, request, result, &block|
       case response.code
       when 200
         p "200 #{result} #{response}"
@@ -188,16 +203,16 @@ def destroy_instances(node, node_instances, node_platform, count = 1)
   node_resource = RestClient::Resource.new(APP_CONFIG['node_url'],
                                            node['identifier'],
                                            node['passphrase'])
-  puts "Node instances: #{node_instances}"
   count.times do |n|
-    node_instance = node_instances.reverse[n]['aws_instance']
-    puts "Node Instance: #{node_instances}"
+    node_instance = node_instances.reverse[n]
     unless count < node['instances'] && node_instance['primary'] == false
       begin
-        @ec2.terminate_instances([node_instance])
+        aws_instance = @ec2.terminate_instances([node_instance['aws_instance']])
       rescue
       end
-      node_resource.post(:accept => :json, :node_instance => node_instance, :operation => "delete")
+      node_resource['instance'].post(:accept => :json,
+                                     :node_instance => node_instance,
+                                     :operation => "destroy")
     else
     end
   end
@@ -216,17 +231,9 @@ def launch_instances(node, node_template, node_platform, count = 1)
   else
     @ec2.delete_key_pair(keypair_name)
     key = @ec2.create_key_pair(keypair_name)
-    node_resource.post(:key => key[:aws_material], :key_fingerprint => key[:aws_fingerprint]) do |response, request, result, &block|
-      case response.code
-      when 200
-        p "200 #{result} #{response}"
-        response
-      when 404
-        p "404 Error: #{result}"
-      else
-        response.return!(request, result, &block)
-      end
-    end
+    node_resource.post(:accept => :json,
+                       :key => key[:aws_material],
+                       :key_fingerprint => key[:aws_fingerprint])
   end
 
   user_data = <<END
@@ -248,7 +255,9 @@ END
     rescue
 
     end
-    node_resource.post(:aws_instance => aws_instance) if aws_instance
+    node_resource['instance'].post(:accept => :json,
+                                   :aws_instance => aws_instance,
+                                   :operation => "create") if aws_instance
   end
 end
 
