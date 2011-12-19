@@ -1,7 +1,0 @@
-platform_identifier: a75ec7f0f76c012ef7971027e4fa8a53
-platform_passphrase: password
-platform_url: http://192.168.1.1
-beetle_server: 192.168.1.1:5672
-redis_server: 192.168.1.1:6379
-redis_servers: 192.168.1.1:6379
-
