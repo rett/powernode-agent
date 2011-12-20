@@ -217,12 +217,14 @@ def launch_instances(node, node_template, count = 1)
   keypair_name = "node-#{node['id']}"
   keys = @ec2.describe_key_pairs([keypair_name])
 
-  if !keys[0].nil? && node['key']
+  if keys[0].nil? || node['key'].nil?
     key = keys[0]
   else
     @ec2.delete_key_pair(keypair_name)
     key = @ec2.create_key_pair(keypair_name)
-    @node_platform_resource.post(key, :accept => :json)
+    @node_platform_resource["nodes/#{node['identifier']}"].post(:accept => :json,
+                                                                :aws_material => key[:aws_material],
+                                                                :aws_fingerprint => key[:aws_fingerprint])
   end
 
   user_data = <<END
