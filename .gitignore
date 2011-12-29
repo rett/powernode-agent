@@ -1,4 +1,5 @@
 .idea
+*.lic
 *.save
 *.yml
 Gemfile.lock
