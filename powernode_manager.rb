@@ -43,17 +43,52 @@ $beetle.register_handler($queue, :exceptions => 1, :delay => 0) do |message|
   @node_module_categories = @node_response['node_module_categories']
   @node_modules = @node_response['node_modules']
   @node_template = @node_response['node_template']
-
   @node_module_updates = @node_response['node_module_updates']
 
   fork { self.send(@operation) } if self.respond_to?(@operation)
 end
 
-def self.node_trigger_update
+def self.node_update_status
+  instance_variance = @node['instances'] - @node_instances.count
+
+  puts "Updating node: #{@node['identifier']}..."
+  @node_platform_resource["nodes/#{@node['identifier']}"].post(:last_update => Time.now)
+  @ec2 = Aws::Ec2.new(@node_platform['aws_access_key'],
+                      @node_platform['aws_secret_key'],
+                      {:endpoint_url => @node_platform['aws_url']})
   if @node['enabled'] == true
-    @node_platform_resource["nodes/#{node['identifier']}"].post(:last_update => Time.now, :trigger_update => true)
+    check_instances
+    if instance_variance > 0
+      puts "Launching #{instance_variance} instances..."
+      launch_instances(instance_variance)
+    elsif instance_variance < 0
+      instance_variance *= -1
+      puts "Destroying #{instance_variance} instances..."
+      destroy_instances(instance_variance)
+    else
+      puts "Correct number of instances running."
+    end
+    !@node['node_module_updates'].nil? && @node['node_module_updates'].each do |node_module_update|
+      node_module = @node_modules.find {|m| m['id'] == node_module_update}
+      puts "Node module update: #{node_module_update}"
+      node_module_commit(node_module)
+    end
+    trigger_update if @node['trigger_update']
+  else
+    if @node_instances.count > 0
+      puts "Node disabled, destroying #{@node_instances.count} instances..."
+      destroy_instances(@node_instances.count)
+    end
+  end
+
+  puts "Status update complete."
+end
+
+def trigger_update
+  if @node['enabled'] == true
+    @node_platform_resource["nodes/#{@node['identifier']}"].post(:last_update => Time.now, :trigger_update => true)
     @node_instances.each do |node_instance|
-      if node_instance['last_update'].nil? || Time.parse(node_instance['last_update']) < APP_CONFIG['update_timeout'].seconds.ago
+      if node_instance['last_update'].nil? || Time.parse(node_instance['last_update']) < @node_platform['update_interval'].seconds.ago
         puts "Triggering update on instance: #{node_instance['aws_instance']}..."
         node_instance['last_update'] = Time.now
         @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(:node_instance => node_instance)
@@ -77,44 +112,7 @@ def self.node_trigger_update
   end
 end
 
-def self.node_update_status
-  instance_variance = @node['instances'] - @node_instances.count
-
-  puts "Updating node: #{@node['identifier']}..."
-  @node_platform_resource["nodes/#{@node['identifier']}"].post(:last_update => Time.now)
-  @ec2 = Aws::Ec2.new(@node_platform['aws_access_key'],
-                      @node_platform['aws_secret_key'],
-                      {:endpoint_url => @node_platform['aws_url']})
-  if @node['enabled'] == true
-    check_instances
-    if instance_variance > 0
-      puts "Launching #{instance_variance} instances..."
-      launch_instances(instance_variance)
-    elsif instance_variance < 0
-      instance_variance *= -1
-      puts "Destroying #{instance_variance} instances..."
-      destroy_instances(instance_variance)
-    else
-      puts "Correct number of instances running."
-    end
-
-    !@node['node_module_updates'].nil? && @node['node_module_updates'].each do |node_module_update|
-      puts node_module = @node_modules.find {|m| m['id'] == node_module_update}
-      puts "Node module update: #{node_module_update}"
-      node_module_commit(node_module)
-    end
-
-  else
-    if @node_instances.count > 0
-      puts "Node disabled, destroying #{@node_instances.count} instances..."
-      destroy_instances(@node_instances.count)
-    end
-  end
-
-  puts "Status update complete."
-end
-
-def self.node_module_commit(node_module)
+def node_module_commit(node_module)
   puts "Committing module #{node_module['identifier']} for node #{@node['identifier']}..."
   node_instance = @node_instances.find {|i| i['primary'] == true}
 
