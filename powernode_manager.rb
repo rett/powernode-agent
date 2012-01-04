@@ -20,7 +20,7 @@ Beetle.config do |config|
   config.password = APP_CONFIG['amqp_password']
   config.servers = APP_CONFIG['amqp_servers']
   config.redis_server = APP_CONFIG['redis_server']
-  #config.redis_servers = APP_CONFIG['redis_servers']
+  config.redis_servers = APP_CONFIG['redis_servers']
 end
 
 $queue = APP_CONFIG['amqp_queue']
@@ -31,7 +31,6 @@ $beetle.register_message($queue)
 $beetle.register_handler($queue, :exceptions => 1, :delay => 0) do |message|
   params = JSON.parse(message.data)
   @operation = params['operation']
-  #@node_module = params['node_module']
   @node_platform = params['node_platform']
   @node_platform_resource = RestClient::Resource.new(@node_platform['url'] + "/manage/platform",
                                                      @node_platform['identifier'],
