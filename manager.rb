@@ -10,7 +10,7 @@ require "net/ssh"
 require "net/sftp"
 require "tmpdir"
 
-APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), "manager_config.yml"))
+APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), "config.yml"))
 
 #RestClient.log = "stdout"
 
@@ -31,16 +31,20 @@ $beetle.register_message($queue)
 $beetle.register_handler($queue, :exceptions => 1, :delay => 0) do |message|
   params = JSON.parse(message.data)
   @operation = params['operation']
+  @node_parent = params['parent_url']
   @node_platform = params['node_platform']
-  @node_platform_resource = RestClient::Resource.new(@node_platform['url'] + "/manage/platform",
-                                                     @node_platform['identifier'],
-                                                     @node_platform['passphrase'])
+  @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform['identifier']}",
+                                                     params['identifier'],
+                                                     params['passphrase'])
+
   @node_response = JSON.parse(@node_platform_resource["nodes/#{params['node']['identifier']}"].get(:accept => :json))
+
   @node = @node_response['node']
   @node_template = @node_response['node_template']
   @node_instances = @node_response['node_instances']
   @node_module_categories = @node_response['node_module_categories']
   @node_modules = @node_response['node_modules']
+  @node_provider = @node_response['node_provider']
   @node_template = @node_response['node_template']
   @node_module_updates = @node_response['node_module_updates']
 
@@ -52,9 +56,9 @@ def self.node_update_status
 
   puts "Updating node: #{@node['identifier']}..."
   @node_platform_resource["nodes/#{@node['identifier']}"].post(:last_update => Time.now)
-  @ec2 = Aws::Ec2.new(@node_platform['aws_access_key'],
-                      @node_platform['aws_secret_key'],
-                      {:endpoint_url => @node_platform['aws_url']})
+  @ec2 = Aws::Ec2.new(@node_provider['aws_access_key'],
+                      @node_provider['aws_secret_key'],
+                      {:endpoint_url => @node_provider['aws_url']})
   if @node['enabled'] == true
     check_instances
     if instance_variance > 0
@@ -231,11 +235,13 @@ def launch_instances(count = 1)
                                                                    :aws_fingerprint => key[:aws_fingerprint])
     end
   end
-  user_data = <<END
-PARENT=#{@node_platform['url']}
+
+  user_data = <<-END
+PARENT=#{@node_parent}
 IDENTIFIER=#{@node['identifier']}
 PASSPHRASE=#{@node['passphrase']}
-END
+  END
+
   puts "Launching #{count} instances for #{@node['identifier']}..."
   count.times do
     begin

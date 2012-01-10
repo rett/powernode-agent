@@ -6,4 +6,4 @@ daemon_options = {
   :monitor    => true
 }
 
-Daemons.run('powernode_manager.rb', daemon_options)
+Daemons.run('manager.rb', daemon_options)
