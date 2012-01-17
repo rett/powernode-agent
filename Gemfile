@@ -1,7 +1,9 @@
 source 'http://rubygems.org'
 gem 'aws'
-gem 'rest-client'
+gem 'beetle'
+gem 'eventmachine'
+gem 'i18n'
 gem 'net-ssh'
 gem 'net-sftp'
-gem 'i18n'
-gem 'beetle'
+gem 'rest-client'
+
