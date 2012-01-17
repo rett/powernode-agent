@@ -13,53 +13,56 @@ require 'tmpdir'
 APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), "config.yml"))
 
 $jobs = Hash.new
-EM.threadpool_size = APP_CONFIG['threads']
+EM.threadpool_size = APP_CONFIG['queue_size']
 
 class Handler < Beetle::Handler
   def process
     @params = JSON.parse(message.data)
-    EM.defer(operation, callback)
-  end
-
-  def operation
     @operation = @params['operation']
-    @node_identifier = @params['node']['identifier']
-    @identifier = "#{@node_identifier}_#{@operation}"
+    @identifier = "#{@params['node']['identifier']}_#{@operation}"
     if $jobs[@identifier].nil?
-      $jobs[@identifier] = proc {
-        begin
-          @node_parent = @params['parent_url']
-          @node_platform = @params['node_platform']
-          @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform['identifier']}",
-                                                             @params['identifier'],
-                                                             @params['passphrase'])
-          @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']['identifier']}"].get(:accept => :json))
-          @node = @node_response['node']
-          @node_template = @node_response['node_template']
-          @node_instances = @node_response['node_instances']
-          @node_module_categories = @node_response['node_module_categories']
-          @node_modules = @node_response['node_modules']
-          @node_provider = @node_response['node_provider']
-          @node_template = @node_response['node_template']
-          @node_module_updates = @node_response['node_module_updates']
-          self.send("node_#{@operation}") if self.respond_to?("node_#{@operation}")
-        rescue Exception => e
-          puts "Exception: #{e.message}"
-        end
-        @identifier
-      }
+      puts "Queueing operation: #{@identifier}"
+      EM.defer(operation_start, operation_finish)
     else
-      proc {
-        puts "Skipping currently running operation: #{@identifier}"
-        nil
-      }
+      puts "Operation skipped: #{@identifier}"
     end
   end
 
-  def callback
+  def operation_start
+    $jobs[@identifier] = proc {
+      puts "Operation started: #{@identifier}"
+      begin
+        @node_parent = @params['parent_url']
+        @node_platform = @params['node_platform']
+        @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform['identifier']}",
+                                                           @params['identifier'],
+                                                           @params['passphrase'])
+        @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']['identifier']}"].get(:accept => :json))
+        @node = @node_response['node']
+        @node_template = @node_response['node_template']
+        @node_instances = @node_response['node_instances']
+        @node_module_categories = @node_response['node_module_categories']
+        @node_modules = @node_response['node_modules']
+        @node_provider = @node_response['node_provider']
+        @node_template = @node_response['node_template']
+        @node_module_updates = @node_response['node_module_updates']
+        self.send("node_#{@operation}") if self.respond_to?("node_#{@operation}")
+        puts "Operation finished: #{@identifier}"
+      rescue Exception => e
+        puts "Exception: #{e.message}"
+      end
+      @identifier
+    }
+  end
+
+  def operation_finish
     proc {|result|
       $jobs.delete(result) if result && $jobs.include?(result)
     }
+  end
+
+  def node_test_operation
+    sleep 10
   end
 
   def node_update_status
