@@ -1,1 +1,9 @@
 .idea
+*.lic
+*.save
+*.yml
+Gemfile.lock
+monitor/*.log
+monitor/*.pid
+monitor/*.output
+public/*
