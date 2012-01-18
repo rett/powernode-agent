@@ -294,16 +294,24 @@ class Handler < Beetle::Handler
   end
 end
 
-queue = APP_CONFIG['amqp_queue']
 Beetle.config do |config|
-  #config.logger.level = Logger::DEBUG
-  config.user = APP_CONFIG['amqp_user']
-  config.password = APP_CONFIG['amqp_password']
-  config.servers = APP_CONFIG['amqp_servers']
-  config.redis_server = APP_CONFIG['redis_server']
-  config.redis_servers = APP_CONFIG['redis_servers']
+  config.user = APP_CONFIG['amqp_user'] || "guest"
+  config.password = APP_CONFIG['amqp_password'] || "guest"
+  config.servers = APP_CONFIG['amqp_servers'] || "localhost:5672"
+  config.system_name = APP_CONFIG['amqp_system_name'] || "system"
+  config.additional_subscription_servers = APP_CONFIG['amqp_additional_subscription_servers'] || ""
+  config.vhost = APP_CONFIG['amqp_vhost'] || "/"
+  config.redis_server = APP_CONFIG['redis_server'] || "localhost:6379"
+  config.redis_servers = APP_CONFIG['redis_servers'] || ""
+  config.redis_db = APP_CONFIG['redis_db'] || 4
+  config.redis_failover_timeout = APP_CONFIG['redis_failover_timeout'] || 180.seconds
+  config.redis_configuration_master_retries = APP_CONFIG['redis_configuration_master_retries'] || 3
+  config.redis_configuration_master_retry_interval = APP_CONFIG['redis_configuration_master_retry_interval'] || 10.seconds
+  config.redis_configuration_client_timeout = APP_CONFIG['redis_configuration_client_timeout'] || 5.seconds
+  config.redis_configuration_client_ids = APP_CONFIG['redis_configuration_client_ids'] || ""
 end
 
+queue = APP_CONFIG['amqp_queue']
 beetle = Beetle::Client.new
 beetle.configure do |config|
   config.queue queue
