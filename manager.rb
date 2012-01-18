@@ -21,7 +21,6 @@ class Handler < Beetle::Handler
     @operation = @params['operation']
     @identifier = "#{@params['node']['identifier']}_#{@operation}"
     if $jobs[@identifier].nil?
-      puts "Queueing operation: #{@identifier}"
       EM.defer(operation_start, operation_finish)
     else
       puts "Operation skipped: #{@identifier}"
