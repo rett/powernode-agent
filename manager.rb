@@ -78,7 +78,7 @@ class Handler < Beetle::Handler
         puts "Launching #{instance_variance} instances..."
         node_launch_instances(instance_variance)
       elsif instance_variance < 0
-        instance_variance *= -1
+        instance_variance = instance_variance.abs
         puts "Destroying #{instance_variance} instances..."
         node_destroy_instances(instance_variance)
       else
@@ -261,9 +261,9 @@ class Handler < Beetle::Handler
     end
 
     user_data = <<-END
-  PARENT=#{@node_parent}
-  IDENTIFIER=#{@node['identifier']}
-  PASSPHRASE=#{@node['passphrase']}
+PARENT=#{@node_parent}
+IDENTIFIER=#{@node['identifier']}
+PASSPHRASE=#{@node['passphrase']}
     END
 
     puts "Launching #{count} instances for #{@node['identifier']}..."
