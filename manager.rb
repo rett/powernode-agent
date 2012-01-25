@@ -13,53 +13,55 @@ require 'tmpdir'
 APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), "config.yml"))
 
 $jobs = Hash.new
-EM.threadpool_size = APP_CONFIG['threads']
+EM.threadpool_size = APP_CONFIG['queue_size']
 
 class Handler < Beetle::Handler
   def process
     @params = JSON.parse(message.data)
-    EM.defer(operation, callback)
-  end
-
-  def operation
     @operation = @params['operation']
-    @node_identifier = @params['node']['identifier']
-    @identifier = "#{@node_identifier}_#{@operation}"
+    @identifier = "#{@params['node']['identifier']}_#{@operation}"
     if $jobs[@identifier].nil?
-      $jobs[@identifier] = proc {
-        begin
-          @node_parent = @params['parent_url']
-          @node_platform = @params['node_platform']
-          @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform['identifier']}",
-                                                             @params['identifier'],
-                                                             @params['passphrase'])
-          @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']['identifier']}"].get(:accept => :json))
-          @node = @node_response['node']
-          @node_template = @node_response['node_template']
-          @node_instances = @node_response['node_instances']
-          @node_module_categories = @node_response['node_module_categories']
-          @node_modules = @node_response['node_modules']
-          @node_provider = @node_response['node_provider']
-          @node_template = @node_response['node_template']
-          @node_module_updates = @node_response['node_module_updates']
-          self.send("node_#{@operation}") if self.respond_to?("node_#{@operation}")
-        rescue Exception => e
-          puts "Exception: #{e.message}"
-        end
-        @identifier
-      }
+      EM.defer(operation_start, operation_finish)
     else
-      proc {
-        puts "Skipping currently running operation: #{@identifier}"
-        nil
-      }
+      puts "Operation skipped: #{@identifier}"
     end
   end
 
-  def callback
+  def operation_start
+    $jobs[@identifier] = proc {
+      puts "Operation started: #{@identifier}"
+      begin
+        @node_parent = @params['parent_url']
+        @node_platform = @params['node_platform']
+        @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform['identifier']}",
+                                                           @params['identifier'],
+                                                           @params['passphrase'])
+        @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']['identifier']}"].get(:accept => :json))
+        @node = @node_response['node']
+        @node_template = @node_response['node_template']
+        @node_instances = @node_response['node_instances']
+        @node_module_categories = @node_response['node_module_categories']
+        @node_modules = @node_response['node_modules']
+        @node_provider = @node_response['node_provider']
+        @node_template = @node_response['node_template']
+        @node_module_updates = @node_response['node_module_updates']
+        self.send("node_#{@operation}") if self.respond_to?("node_#{@operation}")
+        puts "Operation finished: #{@identifier}"
+      rescue Exception => e
+        puts "Exception: #{e.message}"
+      end
+      @identifier
+    }
+  end
+
+  def operation_finish
     proc {|result|
       $jobs.delete(result) if result && $jobs.include?(result)
     }
+  end
+
+  def node_test_operation
+    sleep 10
   end
 
   def node_update_status
@@ -76,7 +78,7 @@ class Handler < Beetle::Handler
         puts "Launching #{instance_variance} instances..."
         node_launch_instances(instance_variance)
       elsif instance_variance < 0
-        instance_variance *= -1
+        instance_variance = instance_variance.abs
         puts "Destroying #{instance_variance} instances..."
         node_destroy_instances(instance_variance)
       else
@@ -259,9 +261,9 @@ class Handler < Beetle::Handler
     end
 
     user_data = <<-END
-  PARENT=#{@node_parent}
-  IDENTIFIER=#{@node['identifier']}
-  PASSPHRASE=#{@node['passphrase']}
+PARENT=#{@node_parent}
+IDENTIFIER=#{@node['identifier']}
+PASSPHRASE=#{@node['passphrase']}
     END
 
     puts "Launching #{count} instances for #{@node['identifier']}..."
@@ -291,16 +293,24 @@ class Handler < Beetle::Handler
   end
 end
 
-queue = APP_CONFIG['amqp_queue']
 Beetle.config do |config|
-  #config.logger.level = Logger::DEBUG
-  config.user = APP_CONFIG['amqp_user']
-  config.password = APP_CONFIG['amqp_password']
-  config.servers = APP_CONFIG['amqp_servers']
-  config.redis_server = APP_CONFIG['redis_server']
-  config.redis_servers = APP_CONFIG['redis_servers']
+  config.user = APP_CONFIG['amqp_user'] || "guest"
+  config.password = APP_CONFIG['amqp_password'] || "guest"
+  config.servers = APP_CONFIG['amqp_servers'] || "localhost:5672"
+  config.system_name = APP_CONFIG['amqp_system_name'] || "system"
+  config.additional_subscription_servers = APP_CONFIG['amqp_additional_subscription_servers'] || ""
+  config.vhost = APP_CONFIG['amqp_vhost'] || "/"
+  config.redis_server = APP_CONFIG['redis_server'] || "localhost:6379"
+  config.redis_servers = APP_CONFIG['redis_servers'] || ""
+  config.redis_db = APP_CONFIG['redis_db'] || 4
+  config.redis_failover_timeout = APP_CONFIG['redis_failover_timeout'] || 180.seconds
+  config.redis_configuration_master_retries = APP_CONFIG['redis_configuration_master_retries'] || 3
+  config.redis_configuration_master_retry_interval = APP_CONFIG['redis_configuration_master_retry_interval'] || 10.seconds
+  config.redis_configuration_client_timeout = APP_CONFIG['redis_configuration_client_timeout'] || 5.seconds
+  config.redis_configuration_client_ids = APP_CONFIG['redis_configuration_client_ids'] || ""
 end
 
+queue = APP_CONFIG['amqp_queue']
 beetle = Beetle::Client.new
 beetle.configure do |config|
   config.queue queue
