@@ -68,7 +68,7 @@ class Handler < Beetle::Handler
     instance_variance = @node['instances'] - @node_instances.count
 
     puts "Updating node: #{@node['identifier']}..."
-    @node_platform_resource["nodes/#{@node['identifier']}"].post(:last_update => Time.now)
+    @node_platform_resource["nodes/#{@node['identifier']}"].post(:polling => true)
     @ec2 = Aws::Ec2.new(@node_provider['aws_access_key'],
                         @node_provider['aws_secret_key'],
                         {:endpoint_url => @node_provider['aws_url']})
@@ -103,11 +103,10 @@ class Handler < Beetle::Handler
 
   def node_trigger_update
     if @node['enabled'] == true
-      @node_platform_resource["nodes/#{@node['identifier']}"].post(:last_update => Time.now, :trigger_update => true)
+      @node_platform_resource["nodes/#{@node['identifier']}"].post(:trigger_update => true)
       @node_instances.each do |node_instance|
-        if node_instance['last_update'].nil? || Time.parse(node_instance['last_update']) < @node_platform['update_interval'].seconds.ago
+        if Time.parse(node_instance['updated_at']) < @node_platform['update_interval'].seconds.ago
           puts "Triggering update on instance: #{node_instance['aws_instance']}..."
-          node_instance['last_update'] = Time.now
           @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(:node_instance => node_instance)
           begin
             session = Net::SSH.start(node_instance['ip_private'],
@@ -283,7 +282,7 @@ PASSPHRASE=#{@node['passphrase']}
       node_instance['aws_instance'] = aws_instance[:aws_instance_id]
       node_instance['ip_private'] = aws_instance[:private_dns_name]
       node_instance['state'] = aws_instance[:aws_state]
-      node_instance['start_time'] = aws_instance[:aws_launch_time]
+      node_instance['started_at'] = aws_instance[:aws_launch_time]
       begin
         @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(:node_instance => node_instance)
       rescue Exception => e
