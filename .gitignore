@@ -3,7 +3,7 @@
 *.save
 *.yml
 Gemfile.lock
-monitor/*.log
-monitor/*.pid
-monitor/*.output
+log/*.log*
+tmp/pids/*.log
+tmp/pids/*.pid
 vendor/*
