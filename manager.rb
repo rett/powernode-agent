@@ -1,128 +1,109 @@
+#!/usr/bin/env ruby
+$:.unshift File.dirname(__FILE__)
+
 require 'rubygems'
 require 'bundler/setup'
+require 'active_support/time'
 require 'aws'
-require 'beetle'
-require 'benchmark'
-require 'eventmachine'
 require 'json'
+require 'logger'
+require 'resque'
+require 'resque-lock-timeout'
+require 'restclient'
 require 'net/ssh'
 require 'net/sftp'
-require 'restclient'
 require 'tmpdir'
 
 APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), "config.yml"))
 
-$jobs = Hash.new
-EM.threadpool_size = APP_CONFIG['queue_size']
+Resque.redis = APP_CONFIG['redis_server']
 
-class Handler < Beetle::Handler
-  def process
-    @params = JSON.parse(message.data)
+$logger = Logger.new(File.join(File.dirname(__FILE__) + "/log/manager.log"), "daily")
+
+class Manager
+  extend Resque::Plugins::LockTimeout
+  @lock_timeout = APP_CONFIG['timeout'] if APP_CONFIG['timeout']
+  @queue = :manager
+
+  def self.perform(message)
+    @params = JSON.parse(message)
     @operation = @params['operation']
-    @identifier = "#{@params['node']['identifier']}_#{@operation}"
-    if $jobs[@identifier].nil?
-      EM.defer(operation_start, operation_finish)
-    else
-      puts "Operation skipped: #{@identifier}"
+
+    begin
+      @node_parent = APP_CONFIG['parent_url']
+      @node_platform = @params['node_platform']
+      @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform}",
+                                                        APP_CONFIG['identifier'],
+                                                        APP_CONFIG['passphrase'])
+      @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']}"].get(:accept => :json))
+      @node = @node_response['node']
+      @node_template = @node_response['node_template']
+      @node_instances = @node_response['node_instances']
+      @node_module_categories = @node_response['node_module_categories']
+      @node_modules = @node_response['node_modules']
+      @node_provider = @node_response['node_provider']
+      @node_template = @node_response['node_template']
+      @node_module_commit = @node_response['node_module_commit']
+      @stamp = "[#{@operation}:#{@node['identifier']}]"
+      self.send("node_#{@operation}") if self.respond_to?("node_#{@operation}")
+    rescue Exception => e
+      $logger.error "#{@stamp} Exception: #{e.message}"
     end
   end
 
-  def operation_start
-    $jobs[@identifier] = proc {
-      puts "Operation started: #{@identifier}"
-      begin
-        @node_parent = @params['parent_url']
-        @node_platform = @params['node_platform']
-        @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform['identifier']}",
-                                                           @params['identifier'],
-                                                           @params['passphrase'])
-        @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']['identifier']}"].get(:accept => :json))
-        @node = @node_response['node']
-        @node_template = @node_response['node_template']
-        @node_instances = @node_response['node_instances']
-        @node_module_categories = @node_response['node_module_categories']
-        @node_modules = @node_response['node_modules']
-        @node_provider = @node_response['node_provider']
-        @node_template = @node_response['node_template']
-        @node_module_updates = @node_response['node_module_updates']
-        self.send("node_#{@operation}") if self.respond_to?("node_#{@operation}")
-        puts "Operation finished: #{@identifier}"
-      rescue Exception => e
-        puts "Exception: #{e.message}"
-      end
-      @identifier
-    }
-  end
-
-  def operation_finish
-    proc {|result|
-      $jobs.delete(result) if result && $jobs.include?(result)
-    }
-  end
-
-  def node_test_operation
-    sleep 10
-  end
-
-  def node_update_status
+  def self.node_poll
     instance_variance = @node['instances'] - @node_instances.count
-
-    puts "Updating node: #{@node['identifier']}..."
+    $logger.info "#{@stamp} Poll started."
     @node_platform_resource["nodes/#{@node['identifier']}"].post(:polling => true)
     @ec2 = Aws::Ec2.new(@node_provider['aws_access_key'],
                         @node_provider['aws_secret_key'],
-                        {:endpoint_url => @node_provider['aws_url']})
+                        {:endpoint_url => !@node_provider['aws_url'].empty? ? @node_provider['aws_url'] : nil})
     if @node['enabled'] == true
       node_check_instances
       if instance_variance > 0
-        puts "Launching #{instance_variance} instances..."
+        $logger.info "#{@stamp} Launching #{instance_variance} instances."
         node_launch_instances(instance_variance)
       elsif instance_variance < 0
         instance_variance = instance_variance.abs
-        puts "Destroying #{instance_variance} instances..."
+        $logger.info "#{@stamp} Destroying #{instance_variance} instances."
         node_destroy_instances(instance_variance)
-      else
-        puts "Correct number of instances running."
       end
-      if !@node['node_module_updates'].nil?
-        @node['node_module_updates'].each do |node_module_update|
-          node_module = @node_modules.find {|m| m['id'] == node_module_update}
-          puts "Node module update: #{node_module_update}"
+      if !@node['node_module_commit'].nil?
+        @node['node_module_commit'].each do |node_module_commit|
+          node_module = @node_modules.find {|m| m['id'] == node_module_commit}
           node_commit_node_module(node_module)
         end
       end
       node_trigger_update if @node['trigger_update']
     else
       if @node_instances.count > 0
-        puts "Node disabled, destroying #{@node_instances.count} instances..."
+        $logger.info "#{@stamp} Node disabled, destroying #{@node_instances.count} instances."
         node_destroy_instances(@node_instances.count)
       end
     end
-    puts "Status update complete."
+    $logger.info "#{@stamp} Poll complete."
   end
 
-  def node_trigger_update
+  def self.node_trigger_update
     if @node['enabled'] == true
       @node_platform_resource["nodes/#{@node['identifier']}"].post(:trigger_update => true)
       @node_instances.each do |node_instance|
-        if Time.parse(node_instance['updated_at']) < @node_platform['update_interval'].seconds.ago
-          puts "Triggering update on instance: #{node_instance['aws_instance']}..."
-          @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(:node_instance => node_instance)
-          begin
-            session = Net::SSH.start(node_instance['ip_private'],
-                                     @node_template['admin_user'],
-                                     :key_data => node['key'],
-                                     :paranoid => false)
-          rescue Exception => e
-            puts "Exception: #{e.message}"
-          end
-          if session
-            @node_module_categories.each do |c|
-              begin
-                session.exec!("sudo ipn -auv #{c} all")
-              rescue Exception => e
-                puts "Exception: #{e.message}"
-              end
+        $logger.info "#{@stamp} Triggering update on instance: #{node_instance['aws_instance']}."
+        @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(:node_instance => node_instance)
+        begin
+          session = Net::SSH.start(node_instance['ip_private'],
+                                   @node_template['admin_user'],
+                                   :key_data => @node['key'],
+                                   :paranoid => false)
+        rescue Exception => e
+          $logger.error "#{@stamp} Exception: #{e.message}"
+        end
+        if session
+          @node_module_categories.each do |c|
+            begin
+              session.exec!("sudo ipn -auv #{c} all")
+            rescue Exception => e
+              $logger.error "#{@stamp} Exception: #{e.message}"
             end
           end
         end
@@ -130,12 +111,12 @@ class Handler < Beetle::Handler
     end
   end
 
-  def node_check_instances
-    puts "Checking instances for #{@node['identifier']}..."
+  def self.node_check_instances
+    $logger.info "#{@stamp} Performing instance check."
     begin
       aws_instances = @ec2.describe_instances(@node_instances.map {|i| i['aws_instance']})
     rescue Exception => e
-      puts "Exception: #{e.message}"
+      $logger.error "#{@stamp} Exception: #{e.message}"
     end
     @node_instances.each do |node_instance|
       if aws_instance = aws_instances.find {|i| i[:aws_instance_id] == node_instance['aws_instance']}
@@ -155,12 +136,13 @@ class Handler < Beetle::Handler
     begin
       @node_platform_resource["nodes/#{@node['identifier']}/instances.json"].post(:node_instances => @node_instances.to_json)
     rescue Exception => e
-      puts "Exception: #{e.message}"
+      $logger.error "#{@stamp} Exception: #{e.message}"
     end
+    $logger.info "#{@stamp} Instance check complete."
   end
 
-  def node_commit_node_module(node_module)
-    puts "Committing module #{node_module['identifier']} for node #{@node['identifier']}..."
+  def self.node_commit_node_module(node_module)
+    $logger.info "#{@stamp} Committing module #{node_module['identifier']}."
     node_instance = @node_instances.find {|i| i['primary'] == true}
 
     if !node_instance.nil? && !node_module['spec'].empty?
@@ -186,13 +168,13 @@ class Handler < Beetle::Handler
               FileUtils.ln_s(session.realpath!(file).name, target_path)
             end
           rescue Exception => e
-            puts "Exception: #{e} on file: #{file}"
+            $logger.error "#{@stamp} Exception: #{e} on file: #{file}"
           end
           begin
             FileUtils.chown(session.lstat!(file).attributes[:uid], session.lstat!(file).attributes[:gid], target_path)
             FileUtils.chmod(session.lstat!(file).attributes[:permissions], target_path)
           rescue Exception => e
-            puts "Exception: #{e.message}"
+            $logger.error "#{@stamp} Exception: #{e.message}"
           end
         end
       end
@@ -205,38 +187,39 @@ class Handler < Beetle::Handler
         :multipart => true,
         :content_type => "application/octet-stream")
       FileUtils.remove_entry_secure tmp_dir
-      puts "Commit complete."
+      $logger.info "#{@stamp} Commit complete."
     elsif node_instance.nil?
-      puts "Commit aborted: No primary node instance found!"
+      $logger.warn "#{@stamp} Commit aborted: No primary node instance found!"
     else
-      puts "Commit aborted: No module specification!"
+      $logger.warn "#{@stamp} Commit aborted: No module specification!"
     end
   end
 
-  def node_destroy_instances(count = 1)
-    puts "Destroying #{count} instances for #{@node['identifier']}..."
+  def self.node_destroy_instances(count = 1)
+    $logger.info "#{@stamp} Destroying #{count} instances."
     count.times do |n|
       node_instance = @node_instances.reverse[n]
         begin
           @ec2.terminate_instances([node_instance['aws_instance']])
         rescue Exception => e
-          puts "Exception: #{e.message}"
+          $logger.error "#{@stamp} Exception: #{e.message}"
         end
         begin
           @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(:node_instance => node_instance, :operation => "destroy")
         rescue Exception => e
-          puts "Exception: #{e.message}"
+          $logger.error "#{@stamp} Exception: #{e.message}"
         end
     end
   end
 
-  def node_launch_instances(count = 1)
-    puts "Loading key for node: #{@node['identifier']}..."
+  def self.node_launch_instances(count = 1)
+    $logger.info "#{@stamp} Loading key."
     keypair_name = @node['identifier']
     begin
+      keys = []
       keys = @ec2.describe_key_pairs([keypair_name])
     rescue Exception => e
-      puts "Exception: #{e.message}"
+      $logger.error "#{@stamp} Exception: #{e.message}"
     end
     if !keys[0].nil? && keys[0][:aws_fingerprint] == @node['key_fingerprint']
       key = keys[0]
@@ -244,12 +227,12 @@ class Handler < Beetle::Handler
       begin
         @ec2.delete_key_pair(keypair_name)
       rescue Exception => e
-        puts "Exception: #{e.message}"
+        $logger.error "#{@stamp} Exception: #{e.message}"
       end
       begin
         key = @ec2.create_key_pair(keypair_name)
       rescue Exception => e
-        puts "Exception: #{e.message}"
+        $logger.error "#{@stamp} Exception: #{e.message}"
       end
 
       if key
@@ -259,24 +242,25 @@ class Handler < Beetle::Handler
       end
     end
 
-    user_data = <<-END
+    user_data = <<END
 PARENT=#{@node_parent}
 IDENTIFIER=#{@node['identifier']}
 PASSPHRASE=#{@node['passphrase']}
-    END
 
-    puts "Launching #{count} instances for #{@node['identifier']}..."
+END
+
+    $logger.info "#{@stamp} Launching #{count} instances."
     count.times do
       begin
-        aws_instance = @ec2.launch_instances(@node_template['aws_image'],
-                                             :kernel_id => @node_template['aws_kernel'],
-                                             :ramdisk_id => @node_template['aws_ramdisk'],
-                                             :aws_availability_zone => @node_template['aws_availability_zone'],
+        aws_instance = @ec2.launch_instances(@node_provider['aws_image'],
+                                             :kernel_id => @node_provider['aws_kernel'],
+                                             :ramdisk_id => @node_provider['aws_ramdisk'],
+                                             :aws_availability_zone => @node_provider['aws_availability_zone'],
                                              :instance_type => @node_template['aws_instance_type'],
                                              :key_name => keypair_name,
                                              :user_data => user_data)[0]
       rescue Exception => e
-        puts "Exception: #{e.message}"
+        $logger.error "#{@stamp} Exception: #{e.message}"
       end
       node_instance = Hash.new
       node_instance['aws_instance'] = aws_instance[:aws_instance_id]
@@ -286,41 +270,8 @@ PASSPHRASE=#{@node['passphrase']}
       begin
         @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(:node_instance => node_instance)
       rescue Exception => e
-        puts "Exception: #{e.message}"
+        $logger.error "#{@stamp} Exception: #{e.message}"
       end
     end
-  end
-end
-
-Beetle.config do |config|
-  config.user = APP_CONFIG['amqp_user'] || "guest"
-  config.password = APP_CONFIG['amqp_password'] || "guest"
-  config.servers = APP_CONFIG['amqp_servers'] || "localhost:5672"
-  config.system_name = APP_CONFIG['amqp_system_name'] || "system"
-  config.additional_subscription_servers = APP_CONFIG['amqp_additional_subscription_servers'] || ""
-  config.vhost = APP_CONFIG['amqp_vhost'] || "/"
-  config.redis_server = APP_CONFIG['redis_server'] || "localhost:6379"
-  config.redis_servers = APP_CONFIG['redis_servers'] || ""
-  config.redis_db = APP_CONFIG['redis_db'] || 4
-  config.redis_failover_timeout = APP_CONFIG['redis_failover_timeout'] || 180.seconds
-  config.redis_configuration_master_retries = APP_CONFIG['redis_configuration_master_retries'] || 3
-  config.redis_configuration_master_retry_interval = APP_CONFIG['redis_configuration_master_retry_interval'] || 10.seconds
-  config.redis_configuration_client_timeout = APP_CONFIG['redis_configuration_client_timeout'] || 5.seconds
-  config.redis_configuration_client_ids = APP_CONFIG['redis_configuration_client_ids'] || ""
-end
-
-queue = APP_CONFIG['amqp_queue']
-beetle = Beetle::Client.new
-beetle.configure do |config|
-  config.queue queue
-  config.message queue
-  config.handler(queue, Handler)
-end
-
-beetle.listen do
-  puts "Started Manager."
-  trap("INT") do
-    beetle.stop_listening
-    puts "Stopped Manager."
   end
 end

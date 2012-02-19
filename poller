@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+
+require 'daemons'
+
+daemon_options = {
+  :app_name   => "poller",
+  :dir        => "./tmp/pids",
+  :monitor    => true
+}
+
+Daemons.run('poller.rb', daemon_options)
