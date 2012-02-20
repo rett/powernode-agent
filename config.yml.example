@@ -8,3 +8,6 @@ timeout: 3600
 
 # Redis configuration
 redis_server: localhost:6379
+
+# Log configuration
+loglevel: WARN

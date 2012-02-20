@@ -19,6 +19,7 @@ APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), "config.yml"))
 Resque.redis = APP_CONFIG['redis_server']
 
 $logger = Logger.new(File.join(File.dirname(__FILE__) + "/log/manager.log"), "daily")
+$logger.level = Logger.const_get(APP_CONFIG['loglevel'].upcase)
 
 class Manager
   extend Resque::Plugins::LockTimeout

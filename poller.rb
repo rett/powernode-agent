@@ -9,15 +9,19 @@ require 'resque'
 require 'manager'
 
 $logger = Logger.new(File.join(File.dirname(__FILE__) + "/log/poller.log"), "daily")
+$logger.level = Logger.const_get(APP_CONFIG['loglevel'].upcase)
 $queue = Resque.queue_from_class(Manager)
 
-$logger.info "Started poller."
-
 trap("INT") do
-  $logger.warn "Stopped poller."
-  $logger.close
-  exit
+  $logger.warn "Stopping poller..."
+  $shutdown = true
 end
+trap("TERM") do
+  $logger.warn "Stopping poller..."
+  $shutdown = true
+end
+
+$logger.warn "Poller started."
 
 node_poller_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/poller",
                                                 APP_CONFIG['identifier'],
@@ -28,8 +32,6 @@ loop do
     node_poller, node_platforms = JSON.parse(node_poller_resource.get(:accept => :json))
   rescue Exception => e
     $logger.error "Exception: #{e.message}"
-    sleep 10
-    retry
   end
   if !node_platforms.nil?
     node_platforms.each do |node_platform|
@@ -40,8 +42,7 @@ loop do
         nodes = JSON.parse(node_platform_resource["nodes"].get(:accept => :json))
       rescue Exception => e
         $logger.error "Exception: #{e.message}"
-        sleep 10
-        retry
+        nodes = nil
       end
       if !nodes.nil?
         nodes.each do |node|
@@ -56,6 +57,10 @@ loop do
         end
       end
     end
+  end
+  if $shutdown
+    $logger.warn "Poller stopped."
+    exit 0
   end
   interval = (node_poller['poll_interval'] - (Time.now - start_time)).to_i + 1
   if interval > 0
