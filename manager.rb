@@ -58,8 +58,8 @@ class Manager
     @node_platform_resource["nodes/#{@node['identifier']}"].post(polling: true)
     @ec2 = Aws::Ec2.new(@node_provider['aws_access_key'],
                         @node_provider['aws_secret_key'],
-                        {endpoint_url: !@node_provider['aws_url'].empty? ? @node_provider['aws_url'] : nil})
-    if @node['enabled'] == true
+                        { endpoint_url: !@node_provider['aws_url'].empty? ? @node_provider['aws_url'] : nil })
+    if @node['enabled']
       node_check_instances
       if instance_variance > 0
         $logger.info "#{@stamp} Launching #{instance_variance} instances."
@@ -276,14 +276,12 @@ class Manager
       end
     end
 
-    user_data = <<END
-PARENT=#{@node_parent}
-IDENTIFIER=#{@node['identifier']}
-PASSPHRASE=#{@node['passphrase']}
+    user_data = <<-END
+PARENT="#{@node_parent}"
+IDENTIFIER="#{@node['identifier']}"
+PASSPHRASE="#{@node['passphrase']}"
+    END
 
-END
-
-    $logger.info "#{@stamp} Launching #{count} instances."
     count.times do
       begin
         aws_instance = @ec2.launch_instances(@node_provider['aws_image'],
@@ -298,6 +296,7 @@ END
       end
       node_instance = {}
       node_instance['aws_instance'] = aws_instance[:aws_instance_id]
+      node_instance['cloud'] = true
       node_instance['ip_private'] = aws_instance[:private_dns_name]
       node_instance['state'] = aws_instance[:aws_state]
       node_instance['started_at'] = aws_instance[:aws_launch_time]

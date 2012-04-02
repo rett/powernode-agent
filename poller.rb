@@ -30,7 +30,7 @@ loop do
   start_time = Time.now
   begin
     node_poller, node_platforms = JSON.parse(node_poller_resource.get(:accept => :json))
-  rescue Exception => e
+  rescue => e
     $logger.error "Exception: #{e.message}"
   end
   if !node_platforms.nil?
@@ -40,7 +40,7 @@ loop do
                                                         APP_CONFIG['passphrase'])
       begin
         nodes = JSON.parse(node_platform_resource["nodes"].get(:accept => :json))
-      rescue Exception => e
+      rescue => e
         $logger.error "Exception: #{e.message}"
         nodes = nil
       end
