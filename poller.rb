@@ -33,7 +33,7 @@ loop do
   rescue => e
     $logger.error "Exception: #{e.message}"
   end
-  if !node_platforms.nil?
+  if node_platforms
     node_platforms.each do |node_platform|
       node_platform_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/platform/#{node_platform}",
                                                         APP_CONFIG['identifier'],

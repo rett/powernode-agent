@@ -148,15 +148,15 @@ class Manager
   def self.node_commit_node_module(node_module)
     $logger.info "#{@stamp} Committing module #{node_module['identifier']}."
     node_instance = @node_instances.find { |i| i['primary'] }
-
-    if !node_instance.nil? && !node_module['spec'].empty?
+    if node_instance && !node_module['spec'].empty?
       tmp_dir = Dir.mktmpdir
       FileUtils.chmod(0755, tmp_dir)
-
       Net::SFTP.start(node_instance['ip_private'], @node_template['admin_user'], key_data: @node['key'], paranoid: false) do |session|
         node_module['spec'].each_line do |file|
           file.chomp!
           target_path = tmp_dir + file
+          target_path.gsub!(/\/+/, '/')
+          file.gsub!(/\/+/, '/')
           begin
             case session.lstat!(file).type
             when 1
@@ -255,7 +255,7 @@ class Manager
     rescue Exception => e
       $logger.error "#{@stamp} Exception: #{e.message}"
     end
-    if !keys[0].nil? && keys[0][:aws_fingerprint] == @node['key_fingerprint']
+    if keys[0].try(:aws_fingerprint) == @node['key_fingerprint']
       key = keys[0]
     else
       begin
@@ -277,9 +277,10 @@ class Manager
     end
 
     user_data = <<-END
-PARENT="#{@node_parent}"
-IDENTIFIER="#{@node['identifier']}"
-PASSPHRASE="#{@node['passphrase']}"
+PARENT=\"#{@node_parent}\"
+IDENTIFIER=\"#{@node['identifier']}\"
+PASSPHRASE=\"#{@node['passphrase']}\"
+PROVISIONAL="true"
     END
 
     count.times do
