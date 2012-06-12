@@ -44,7 +44,7 @@ loop do
         $logger.error "Exception: #{e.message}"
         nodes = nil
       end
-      if !nodes.nil?
+      if nodes.is_a?(Array)
         nodes.each do |node|
           message = {:operation => "poll",
                      :node => node,

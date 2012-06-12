@@ -280,7 +280,7 @@ class Manager
 PARENT=\"#{@node_parent}\"
 IDENTIFIER=\"#{@node['identifier']}\"
 PASSPHRASE=\"#{@node['passphrase']}\"
-PROVISIONAL="true"
+PROVISIONAL=\"true\"
     END
 
     count.times do
