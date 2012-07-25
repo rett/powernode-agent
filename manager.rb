@@ -36,7 +36,7 @@ class Manager
       @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform}",
                                                         APP_CONFIG['identifier'],
                                                         APP_CONFIG['passphrase'])
-      @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']}"].get(accept: :json))
+      @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']}.json"].get(accept: :json))
       @node = @node_response['node']
       @node_template = @node_response['node_template']
       @node_instances = @node_response['node_instances']
@@ -52,22 +52,47 @@ class Manager
     end
   end
 
-  def self.node_poll
-    instance_variance = @node['instances'] - @node_instances.count
-    $logger.info "#{@stamp} Poll started."
-    @node_platform_resource["nodes/#{@node['identifier']}"].post(polling: true)
-    @ec2 = Aws::Ec2.new(@node_provider['aws_access_key'],
-                        @node_provider['aws_secret_key'],
-                        { endpoint_url: !@node_provider['aws_url'].empty? ? @node_provider['aws_url'] : nil })
-    if @node['enabled']
-      node_check_instances
+  def self.node_poll_cloud_instances
+    $logger.info "#{@stamp} Performing cloud instance check."
+    cloud_instances = @node_instances.select { |i| i['cloud'] == true }
+    instance_variance = @node['cloud_instances'] - cloud_instances.count
+    @node_platform_resource["nodes/#{@node['identifier']}.json"].post(polling: true)
+    if @node['enabled'] && cloud_instances.count > 0
+      begin
+        @ec2 = Aws::Ec2.new(@node_provider['aws_access_key'],
+                          @node_provider['aws_secret_key'],
+                          { endpoint_url: !@node_provider['aws_url'].empty? ? @node_provider['aws_url'] : nil })
+        aws_instances = @ec2.describe_instances(cloud_instances.map { |i| i['aws_instance'] })
+      rescue Exception => e
+        $logger.error "#{@stamp} Exception: #{e.message}"
+      end
+      cloud_instances.each do |node_instance|
+        if node_instance['cloud']
+          if (aws_instance = aws_instances.find { |i| i[:aws_instance_id] == node_instance['aws_instance'] })
+            node_instance['error_count'] = 0
+            node_instance['ip_private'] = aws_instance[:private_dns_name]
+            node_instance['state'] = aws_instance[:aws_state]
+          else
+            if node_instance['error_count'] < APP_CONFIG['cloud_error_limit']
+              node_instance['error_count'] += 1
+            else
+              @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance, operation: "destroy")
+            end
+          end
+        end
+      end
+      begin
+        @node_platform_resource["nodes/#{@node['identifier']}/instances.json"].post(node_instances: cloud_instances.to_json)
+      rescue Exception => e
+        $logger.error "#{@stamp} Exception: #{e.message}"
+      end
       if instance_variance > 0
         $logger.info "#{@stamp} Launching #{instance_variance} instances."
         node_launch_instances(instance_variance)
       elsif instance_variance < 0
         instance_variance = instance_variance.abs
         $logger.info "#{@stamp} Destroying #{instance_variance} instances."
-        node_destroy_instances(instance_variance)
+        node_destroy_cloud_instances(instance_variance)
       end
       if !@node['node_module_commit'].nil?
         @node['node_module_commit'].each do |node_module_commit|
@@ -78,12 +103,21 @@ class Manager
       node_instance_exec
       node_trigger_update if @node['trigger_update']
     else
-      if @node_instances.count > 0
-        $logger.info "#{@stamp} Node disabled, destroying #{@node_instances.count} instances."
-        node_destroy_instances(@node_instances.count)
+      if cloud_instances.count > 0
+        $logger.info "#{@stamp} Node disabled, destroying #{cloud_instances.count} instances."
+        node_destroy_cloud_instances(cloud_instances.count)
       end
     end
-    $logger.info "#{@stamp} Poll complete."
+    $logger.info "#{@stamp} Cloud instance check complete."
+  end
+
+  def self.node_poll_physical_instances
+    $logger.info "#{@stamp} Performing physical instance check."
+    physical_instances = @node_instances.select { |i| i['cloud'] == false }
+    physical_instances.each do |node_instance|
+      $logger.info "#{@stamp} Checking physical instance #{node_instance['identifier']}"
+    end
+    $logger.info "#{@stamp} Physical instance check complete."
   end
 
   def self.node_trigger_update
@@ -111,38 +145,6 @@ class Manager
         end
       end
     end
-  end
-
-  def self.node_check_instances
-    $logger.info "#{@stamp} Performing instance check."
-    begin
-      aws_instances = @ec2.describe_instances(@node_instances.map { |i| i['aws_instance'] })
-    rescue Exception => e
-      $logger.error "#{@stamp} Exception: #{e.message}"
-    end
-    @node_instances.each do |node_instance|
-      if node_instance['cloud']
-        if (aws_instance = aws_instances.find { |i| i[:aws_instance_id] == node_instance['aws_instance'] })
-          node_instance['error_count'] = 0
-          node_instance['ip_private'] = aws_instance[:private_dns_name]
-          node_instance['state'] = aws_instance[:aws_state]
-        else
-          if node_instance['error_count'] < APP_CONFIG['cloud_error_limit']
-            node_instance['error_count'] += 1
-          else
-            @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance, operation: "destroy")
-          end
-        end
-      else
-        # Todo: Check physical instance
-      end
-    end
-    begin
-      @node_platform_resource["nodes/#{@node['identifier']}/instances.json"].post(node_instances: @node_instances.to_json)
-    rescue Exception => e
-      $logger.error "#{@stamp} Exception: #{e.message}"
-    end
-    $logger.info "#{@stamp} Instance check complete."
   end
 
   def self.node_commit_node_module(node_module)
@@ -199,7 +201,7 @@ class Manager
     end
   end
 
-  def self.node_destroy_instances(count = 1)
+  def self.node_destroy_cloud_instances(count = 1)
     $logger.info "#{@stamp} Destroying #{count} instances."
     count.times do |n|
       node_instance = @node_instances.reverse[n]
