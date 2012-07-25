@@ -23,7 +23,7 @@ end
 
 $logger.warn "Poller started."
 
-node_poller_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/poller",
+node_poller_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/platform",
                                                 APP_CONFIG['identifier'],
                                                 APP_CONFIG['passphrase'])
 def enqueue_message(node, node_platform, operation)
