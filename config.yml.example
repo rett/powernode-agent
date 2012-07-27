@@ -4,10 +4,11 @@ identifier: 12345123-3456-012f-7654-1027e1212121
 passphrase: passphrase
 
 # Manager configuration
-timeout: 3600
+lock_timeout: 3600
+cloud_error_limit: 3
 
 # Redis configuration
 redis_server: localhost:6379
 
-# Log configuration
+# Log configuration: FATAL, ERROR, WARN, INFO, DEBUG
 loglevel: WARN

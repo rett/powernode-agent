@@ -92,9 +92,9 @@ pool_status()
   pool_getpid
   pool_getcount
   if [ "${PID}" ]; then
-    echo "Status: ${WORKER} running with ${COUNT} workers"
+    echo "${WORKER}: running with ${COUNT} workers"
   else
-    echo "Status: ${WORKER} stopped"
+    echo "${WORKER}: stopped"
   fi
 }
 

@@ -23,37 +23,42 @@ end
 
 $logger.warn "Poller started."
 
-node_poller_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/poller",
+node_poller_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/platform",
                                                 APP_CONFIG['identifier'],
                                                 APP_CONFIG['passphrase'])
+def enqueue_message(node, node_platform, operation)
+  message = { :node => node,
+              :node_platform => node_platform,
+              :operation => operation }.to_json
+  queue = Resque.peek($queue, 0, Resque.size($queue))
+  unless queue.is_a?(Array) && queue.size > 0 && queue.map {|i| i["args"]}.flatten.include?(message)
+    $logger.info "Queueing #{operation} for node #{node}..."
+    Resque.enqueue(Manager, message)
+  end
+end
+
 loop do
   start_time = Time.now
   begin
     node_poller, node_platforms = JSON.parse(node_poller_resource.get(:accept => :json))
-  rescue Exception => e
+  rescue => e
     $logger.error "Exception: #{e.message}"
   end
-  if !node_platforms.nil?
+  if node_platforms.is_a?(Array)
     node_platforms.each do |node_platform|
       node_platform_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/platform/#{node_platform}",
                                                         APP_CONFIG['identifier'],
                                                         APP_CONFIG['passphrase'])
       begin
         nodes = JSON.parse(node_platform_resource["nodes"].get(:accept => :json))
-      rescue Exception => e
+      rescue => e
         $logger.error "Exception: #{e.message}"
         nodes = nil
       end
-      if !nodes.nil?
+      if nodes.is_a?(Array)
         nodes.each do |node|
-          message = {:operation => "poll",
-                     :node => node,
-                     :node_platform => node_platform}.to_json
-          queue = Resque.peek($queue, 0, Resque.size($queue))
-          unless queue.is_a?(Array) && queue.size > 0 && queue.map {|i| i["args"]}.flatten.include?(message)
-            $logger.info "Queueing poll operation for node #{node}..."
-            Resque.enqueue(Manager, message)
-          end
+          enqueue_message(node, node_platform, 'poll_cloud_instances')
+          enqueue_message(node, node_platform, 'poll_physical_instances')
         end
       end
     end
