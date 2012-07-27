@@ -44,7 +44,7 @@ loop do
   rescue => e
     $logger.error "Exception: #{e.message}"
   end
-  if node_poller && node_platforms.is_a?(Array)
+  if node_platforms.is_a?(Array)
     node_platforms.each do |node_platform|
       node_platform_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/platform/#{node_platform}",
                                                         APP_CONFIG['identifier'],
@@ -67,10 +67,13 @@ loop do
     $logger.warn "Poller stopped."
     exit 0
   end
-  interval = (node_poller['poll_interval'] - (Time.now - start_time)).to_i + 1
-  if interval > 0
+  interval = node_poller ? (node_poller['poll_interval'] - (Time.now - start_time)).to_i + 1 : 10
+  if node_poller && interval > 0
     $logger.info "Sleeping #{interval} seconds (Poll cycle took #{node_poller['poll_interval'] - interval} seconds, interval is #{node_poller['poll_interval']} seconds)..."
     sleep interval
+  elsif !node_poller
+    $logger.error "Error: Unable to connect to server, attempting again in 10 seconds."
+    sleep 10
   elsif node_poller['poll_interval'] != 0
     $logger.info "Warning: Poll interval #{node_poller['poll_interval']} appears to be at least #{interval.abs} seconds too short."
   end
