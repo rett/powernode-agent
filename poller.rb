@@ -44,7 +44,7 @@ loop do
   rescue => e
     $logger.error "Exception: #{e.message}"
   end
-  if node_platforms.is_a?(Array)
+  if node_poller && node_platforms.is_a?(Array)
     node_platforms.each do |node_platform|
       node_platform_resource = RestClient::Resource.new("#{APP_CONFIG['parent_url']}/manage/platform/#{node_platform}",
                                                         APP_CONFIG['identifier'],
