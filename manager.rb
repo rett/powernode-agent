@@ -1,10 +1,12 @@
 #!/usr/bin/env ruby
 $:.unshift File.dirname(__FILE__)
 
+ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), 'Gemfile')
+
 require 'rubygems'
 require 'bundler/setup'
 require 'active_support/time'
-require 'aws'
+require 'fog'
 require 'json'
 require 'logger'
 require 'resque'
@@ -14,11 +16,11 @@ require 'net/ssh'
 require 'net/sftp'
 require 'tmpdir'
 
-APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), "config.yml"))
+APP_CONFIG = YAML.load_file(File.join(File.dirname(__FILE__), 'config.yml'))
 
 Resque.redis = APP_CONFIG['redis_server']
 
-$logger = Logger.new(File.join(File.dirname(__FILE__) + "/log/manager.log"), "daily")
+$logger = Logger.new(File.join(File.dirname(__FILE__) + '/log/manager.log'), 'daily')
 $logger.level = Logger.const_get(APP_CONFIG['loglevel'].upcase)
 
 class Manager
@@ -31,14 +33,13 @@ class Manager
     @operation = @params['operation']
 
     begin
-      @node_parent = APP_CONFIG['parent_url']
       @node_platform = @params['node_platform']
-      @node_platform_resource = RestClient::Resource.new("#{@node_parent}/manage/platform/#{@node_platform}",
-                                                        APP_CONFIG['identifier'],
-                                                        APP_CONFIG['passphrase'])
+      @node_platform_resource = RestClient::Resource.new(APP_CONFIG['parent_url'] + '/manage/platform/' + @node_platform,
+                                                         APP_CONFIG['identifier'],
+                                                         APP_CONFIG['passphrase'])
       @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']}.json"].get(accept: :json))
       @node = @node_response['node']
-      @node_template = @node_response['node_template']
+      @node_instance_type = @node_response['node_instance_type']
       @node_instances = @node_response['node_instances']
       @node_module_categories = @node_response['node_module_categories']
       @node_modules = @node_response['node_modules']
@@ -56,35 +57,39 @@ class Manager
     $logger.info "#{@stamp} Performing cloud instance check."
     cloud_instances = @node_instances.select { |i| i['cloud'] == true }
     instance_variance = @node['cloud_instances'] - cloud_instances.count
-    @node_platform_resource["nodes/#{@node['identifier']}.json"].post(polling: true)
-    if @node['enabled'] && cloud_instances.count > 0
-      begin
-        @ec2 = Aws::Ec2.new(@node_provider['aws_access_key'],
-                          @node_provider['aws_secret_key'],
-                          { endpoint_url: !@node_provider['aws_url'].empty? ? @node_provider['aws_url'] : nil })
-        aws_instances = @ec2.describe_instances(cloud_instances.map { |i| i['aws_instance'] })
-      rescue Exception => e
-        $logger.error "#{@stamp} Exception: #{e.message}"
-      end
-      cloud_instances.each do |node_instance|
-        if node_instance['cloud']
-          if (aws_instance = aws_instances.find { |i| i[:aws_instance_id] == node_instance['aws_instance'] })
+    @node_platform_resource["nodes/#{@node['identifier']}.json"].post(poll: true)
+    begin
+      @ec2 = Fog::Compute.new(:provider => 'AWS',
+                              :endpoint => @node_provider.try(:[], 'aws_url'),
+                              :aws_access_key_id => @node_provider['aws_access_key'],
+                              :aws_secret_access_key => @node_provider['aws_secret_key'])
+    rescue Exception => e
+      $logger.error "#{@stamp} Exception: #{e.message}"
+    end
+    if @node['enabled']
+      if cloud_instances.count > 0
+        cloud_instances.each do |node_instance|
+          reservation_set = @ec2.describe_instances(node_instance['aws_instance']).body['reservationSet']
+          if reservation_set.count > 0 && (aws_instance = reservation_set[0]['instancesSet'][0])
+            $logger.debug "#{@stamp} Detected running instance: #{aws_instance['instanceId']}"
             node_instance['error_count'] = 0
-            node_instance['ip_private'] = aws_instance[:private_dns_name]
-            node_instance['state'] = aws_instance[:aws_state]
+            node_instance['ip_private'] = aws_instance['privateIpAddress']
+            node_instance['ip_public'] = aws_instance['publicIpAddress']
+            node_instance['state'] = aws_instance['instanceState']['name']
+          elsif node_instance['error_count'] < APP_CONFIG['cloud_error_limit']
+            $logger.debug "#{@stamp} Incrementing error count for instance: #{node_instance['aws_instance']}"
+            node_instance['error_count'] += 1
           else
-            if node_instance['error_count'] < APP_CONFIG['cloud_error_limit']
-              node_instance['error_count'] += 1
-            else
-              @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance, operation: "destroy")
-            end
+            $logger.debug "#{@stamp} Destroying instance: #{node_instance['aws_instance']}"
+            # Todo: Confirm before deregistering instance
+            @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance, operation: "destroy")
           end
         end
-      end
-      begin
-        @node_platform_resource["nodes/#{@node['identifier']}/instances.json"].post(node_instances: cloud_instances.to_json)
-      rescue Exception => e
-        $logger.error "#{@stamp} Exception: #{e.message}"
+        begin
+          @node_platform_resource["nodes/#{@node['identifier']}/instances.json"].post(node_instances: cloud_instances.to_json)
+        rescue Exception => e
+          $logger.error "#{@stamp} Exception: #{e.message}"
+        end
       end
       if instance_variance > 0
         $logger.info "#{@stamp} Launching #{instance_variance} instances."
@@ -94,7 +99,7 @@ class Manager
         $logger.info "#{@stamp} Destroying #{instance_variance} instances."
         node_destroy_cloud_instances(instance_variance)
       end
-      if !@node['node_module_commit'].nil?
+      if @node['node_module_commit'].is_a?(Array)
         @node['node_module_commit'].each do |node_module_commit|
           node_module = @node_modules.find { |m| m['id'] == node_module_commit }
           node_commit_node_module(node_module)
@@ -102,11 +107,8 @@ class Manager
       end
       node_instance_exec
       node_trigger_update if @node['trigger_update']
-    else
-      if cloud_instances.count > 0
-        $logger.info "#{@stamp} Node disabled, destroying #{cloud_instances.count} instances."
-        node_destroy_cloud_instances(cloud_instances.count)
-      end
+    elsif cloud_instances.count > 0
+      node_destroy_cloud_instances(cloud_instances.count)
     end
     $logger.info "#{@stamp} Cloud instance check complete."
   end
@@ -173,29 +175,29 @@ class Manager
               FileUtils.mkdir_p(target_path[0..target_path.rindex("/")])
               FileUtils.ln_s(session.realpath!(file).name, target_path)
             end
-          rescue Exception => e
-            $logger.error "#{@stamp} Exception: #{e} on file: #{file}"
-          end
-          begin
             FileUtils.chown(session.lstat!(file).attributes[:uid], session.lstat!(file).attributes[:gid], target_path)
             FileUtils.chmod(session.lstat!(file).attributes[:permissions], target_path)
           rescue Exception => e
-            $logger.error "#{@stamp} Exception: #{e.message}"
+            $logger.error "#{@stamp} Exception: #{e} on file: #{file}"
           end
         end
       end
-      tmp_module = Tempfile.new("module-#{@node['id']}")
+      tmp_module = Tempfile.new("module-#{@node['identifier']}")
       tmp_module.close
       system("mksquashfs #{tmp_dir} #{tmp_module.path} -noappend")
-      @node_platform_resource["nodes/#{@node['identifier']}/modules/#{node_module['identifier']}.json"].post(
-        accept: :json,
-        data: File.open(tmp_module),
-        multipart: true,
-        content_type: "application/octet-stream")
-      FileUtils.remove_entry_secure tmp_dir
-      $logger.info "#{@stamp} Commit complete."
+      if tmp_module.size > 0
+        @node_platform_resource["nodes/#{@node['identifier']}/modules/#{node_module['identifier']}.json"].post(
+          accept: :json,
+          data: File.open(tmp_module),
+          multipart: true,
+          content_type: "application/octet-stream")
+        FileUtils.remove_entry_secure tmp_dir
+        $logger.info "#{@stamp} Commit complete."
+      else
+        $logger.info "#{@stamp} Commit aborted."
+      end
     elsif node_instance.nil?
-      $logger.warn "#{@stamp} Commit aborted: No primary node instance found!"
+      $logger.warn "#{@stamp} Commit aborted: No primary instance found!"
     else
       $logger.warn "#{@stamp} Commit aborted: No module specification!"
     end
@@ -220,23 +222,25 @@ class Manager
 
   def self.node_instance_exec
     @node_instances.each do |node_instance|
-      node_instance['execute'] ||= []
-      node_instance['execute'].each do |command|
-        $logger.error "#{@stamp} Executing \'#{command}\' on #{node_instance['aws_instance']}..."
-        node_instance['execute'].delete(command)
-        begin
-          session = Net::SSH.start(node_instance['ip_private'],
-                                   @node_template['admin_user'],
-                                   key_data: @node['key'],
-                                   paranoid: false)
-        rescue Exception => e
-          $logger.error "#{@stamp} Exception: #{e.message}"
-        end
-        if session
+      $logger.info "Executing commands on instance: #{node_instance['name']}"
+      if node_instance['execute'].is_a?(Array)
+        node_instance['execute'].each do |command|
+          $logger.info "#{@stamp} Executing \'#{command}\' on #{node_instance['aws_instance']}..."
+          node_instance['execute'].delete(command)
           begin
-            session.exec!("sudo #{command}")
+            session = Net::SSH.start(node_instance['ip_private'],
+                                     @node_template['admin_user'],
+                                     key_data: @node['key'],
+                                     paranoid: false)
           rescue Exception => e
             $logger.error "#{@stamp} Exception: #{e.message}"
+          end
+          if session
+            begin
+              session.exec!("sudo #{command}")
+            rescue Exception => e
+              $logger.error "#{@stamp} Exception: #{e.message}"
+            end
           end
         end
       end
@@ -251,58 +255,67 @@ class Manager
   def self.node_launch_instances(count = 1)
     $logger.info "#{@stamp} Loading key."
     keypair_name = @node['identifier']
+    keys = []
     begin
-      keys = []
-      keys = @ec2.describe_key_pairs([keypair_name])
+      $logger.debug "#{@stamp} Attempting to retrieve keys..."
+      keys = @ec2.describe_key_pairs([keypair_name]).body['keySet']
     rescue Exception => e
       $logger.error "#{@stamp} Exception: #{e.message}"
     end
-    if keys[0].try(:aws_fingerprint) == @node['key_fingerprint']
+    $logger.debug "#{@stamp} FINGERPRINT: #{keys[0]['keyFingerprint']}"
+    if keys[0].try(:[], 'keyFingerprint') == @node['key_fingerprint']
       key = keys[0]
+      $logger.debug "#{@stamp} Found valid key: #{key}"
     else
       begin
+        $logger.debug "#{@stamp} Deleting key: #{keypair_name}"
         @ec2.delete_key_pair(keypair_name)
       rescue Exception => e
         $logger.error "#{@stamp} Exception: #{e.message}"
       end
       begin
-        key = @ec2.create_key_pair(keypair_name)
+        $logger.debug "#{@stamp} Creating key: #{keypair_name}"
+        key = @ec2.create_key_pair(keypair_name).body
       rescue Exception => e
         $logger.error "#{@stamp} Exception: #{e.message}"
       end
-
-      if key
+      $logger.debug "#{@stamp} Using key: #{keypair_name}"
+      if key['keyMaterial']
         @node_platform_resource["nodes/#{@node['identifier']}"].post(accept: :json,
-                                                                     aws_material: key[:aws_material],
-                                                                     aws_fingerprint: key[:aws_fingerprint])
+                                                                     key: key['keyMaterial'],
+                                                                     key_fingerprint: key['keyFingerprint'])
       end
     end
 
     user_data = <<-END
-PARENT=\"#{@node_parent}\"
+PARENT=\"#{APP_CONFIG['parent_url']}\"
 IDENTIFIER=\"#{@node['identifier']}\"
 PASSPHRASE=\"#{@node['passphrase']}\"
 PROVISIONAL=\"true\"
     END
 
     count.times do
+        instance_options = {}
+        instance_options[:availability_zone] = @node_provider['aws_availability_zone'] if @node_provider['aws_availability_zone']
+        instance_options[:image_id] = @node_provider['aws_image'] if !@node_provider['aws_image'].empty?
+        instance_options[:ramdisk_id] = @node_provider['aws_ramdisk'] if !@node_provider['aws_ramdisk'].empty?
+        instance_options[:flavor_id] = @node_instance_type['name']
+        instance_options[:key_name] = key['keyName']
+        instance_options[:user_data] = user_data
       begin
-        aws_instance = @ec2.launch_instances(@node_provider['aws_image'],
-                                             kernel_id: @node_provider['aws_kernel'],
-                                             ramdisk_id: @node_provider['aws_ramdisk'],
-                                             aws_availability_zone: @node_provider['aws_availability_zone'],
-                                             instance_type: @node_template['aws_instance_type'],
-                                             key_name: keypair_name,
-                                             user_data: user_data)[0]
+        aws_instance = @ec2.servers.create(instance_options)
       rescue Exception => e
         $logger.error "#{@stamp} Exception: #{e.message}"
       end
+      $logger.debug "#{@stamp} NEW AWS INSTANCE: #{aws_instance.id}"
       node_instance = {}
-      node_instance['aws_instance'] = aws_instance[:aws_instance_id]
+      node_instance['name'] = aws_instance.id
+      node_instance['aws_instance'] = aws_instance.id
       node_instance['cloud'] = true
-      node_instance['ip_private'] = aws_instance[:private_dns_name]
-      node_instance['state'] = aws_instance[:aws_state]
-      node_instance['started_at'] = aws_instance[:aws_launch_time]
+      node_instance['ip_private'] = aws_instance.private_ip_address
+      node_instance['ip_public'] = aws_instance.ip_address
+      node_instance['state'] = aws_instance.state
+      node_instance['started_at'] = aws_instance.created_at
       begin
         @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance)
       rescue Exception => e
