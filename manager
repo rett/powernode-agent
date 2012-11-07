@@ -23,7 +23,7 @@ pool_getpid()
 {
   if [ -f "${PIDFILE}" ]; then
     PID="$(cat $PIDFILE)"
-    if [ ! "$(ps -A | grep ${PID} 2>/dev/null)" ]; then
+    if [ ! "$(ps -A | grep ${PID} | grep resque-pool-master 2>/dev/null)" ]; then
       echo "$PID not running, cleaning up."
       rm "${PIDFILE}"
       unset PID

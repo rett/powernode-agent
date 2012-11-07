@@ -39,10 +39,10 @@ class Manager
                                                          APP_CONFIG['passphrase'])
       @node_response = JSON.parse(@node_platform_resource["nodes/#{@params['node']}.json"].get(accept: :json))
       @node = @node_response['node']
-      @node_instance_type = @node_response['node_instance_type']
       @node_instances = @node_response['node_instances']
-      @node_module_categories = @node_response['node_module_categories']
       @node_modules = @node_response['node_modules']
+      @node_instance_type = @node_response['node_instance_type']
+      @node_module_categories = @node_response['node_module_categories']
       @node_provider = @node_response['node_provider']
       @node_template = @node_response['node_template']
       @node_module_commit = @node_response['node_module_commit']
@@ -55,8 +55,10 @@ class Manager
 
   def self.node_poll_cloud_instances
     $logger.info "#{@stamp} Performing cloud instance check."
-    cloud_instances = @node_instances.select { |i| i['cloud'] == true }
+    cloud_instances = JSON.parse(@node_platform_resource["nodes/#{@node['identifier']}/instances"].get(accept: :json,
+                                                                                                       params: { criteria: :cloud }))
     instance_variance = @node['cloud_instances'] - cloud_instances.count
+    $logger.info "#{@stamp} Instance variance: #{instance_variance}"
     @node_platform_resource["nodes/#{@node['identifier']}.json"].post(poll: true)
     begin
       @ec2 = Fog::Compute.new(:provider => 'AWS',
@@ -69,20 +71,28 @@ class Manager
     if @node['enabled']
       if cloud_instances.count > 0
         cloud_instances.each do |node_instance|
-          reservation_set = @ec2.describe_instances(node_instance['aws_instance']).body['reservationSet']
-          if reservation_set.count > 0 && (aws_instance = reservation_set[0]['instancesSet'][0])
-            $logger.debug "#{@stamp} Detected running instance: #{aws_instance['instanceId']}"
+          begin
+            aws_instance = @ec2.servers.get(node_instance['aws_instance'])
+          rescue Exception => e
+            $logger.error "#{@stamp} Exception: #{e.message}"
+          end
+          if aws_instance && aws_instance.flavor_id == @node_instance_type['name']
+            $logger.debug "#{@stamp} Detected running instance: #{aws_instance.id}"
             node_instance['error_count'] = 0
-            node_instance['ip_private'] = aws_instance['privateIpAddress']
-            node_instance['ip_public'] = aws_instance['publicIpAddress']
-            node_instance['state'] = aws_instance['instanceState']['name']
+            node_instance['ip_private'] = aws_instance.private_ip_address
+            node_instance['ip_public'] = aws_instance.public_ip_address
+            node_instance['state'] = aws_instance.state
+          elsif aws_instance && aws_instance.flavor_id != @node_instance_type['name']
+            $logger.debug "#{@stamp} Node instance type incorrect for instance: #{aws_instance.id}"
+            node_destroy_cloud_instance(node_instance)
+            node_launch_instances(1)
           elsif node_instance['error_count'] < APP_CONFIG['cloud_error_limit']
             $logger.debug "#{@stamp} Incrementing error count for instance: #{node_instance['aws_instance']}"
             node_instance['error_count'] += 1
           else
-            $logger.debug "#{@stamp} Destroying instance: #{node_instance['aws_instance']}"
+            $logger.debug "#{@stamp} Deregistering instance: #{node_instance['aws_instance']}"
             # Todo: Confirm before deregistering instance
-            @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance, operation: "destroy")
+            @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance, operation: 'destroy')
           end
         end
         begin
@@ -97,18 +107,16 @@ class Manager
       elsif instance_variance < 0
         instance_variance = instance_variance.abs
         $logger.info "#{@stamp} Destroying #{instance_variance} instances."
-        node_destroy_cloud_instances(instance_variance)
+        node_destroy_cloud_instances(cloud_instances, instance_variance)
       end
       if @node['node_module_commit'].is_a?(Array)
         @node['node_module_commit'].each do |node_module_commit|
-          node_module = @node_modules.find { |m| m['id'] == node_module_commit }
+          node_module = @node_modules.find { |m| m['identifier'] == node_module_commit }
           node_commit_node_module(node_module)
         end
       end
-      node_instance_exec
-      node_trigger_update if @node['trigger_update']
     elsif cloud_instances.count > 0
-      node_destroy_cloud_instances(cloud_instances.count)
+      node_destroy_cloud_instances(cloud_instances, cloud_instances.count)
     end
     $logger.info "#{@stamp} Cloud instance check complete."
   end
@@ -151,13 +159,13 @@ class Manager
 
   def self.node_commit_node_module(node_module)
     $logger.info "#{@stamp} Committing module #{node_module['identifier']}."
-    node_instance = @node_instances.find { |i| i['primary'] }
-    if node_instance && !node_module['spec'].empty?
+    node_instance = JSON.parse(@node_platform_resource["nodes/#{@node['identifier']}/instances"].get(accept: :json,
+                                                                                                     params: { criteria: :primary }))
+    if node_instance && !node_module['effective_spec'].empty?
       tmp_dir = Dir.mktmpdir
       FileUtils.chmod(0755, tmp_dir)
       Net::SFTP.start(node_instance['ip_private'], @node_template['admin_user'], key_data: @node['key'], paranoid: false) do |session|
-        node_module['spec'].each_line do |file|
-          file.chomp!
+        node_module['effective_spec'].each do |file|
           target_path = tmp_dir + file
           target_path.gsub!(/\/+/, '/')
           file.gsub!(/\/+/, '/')
@@ -203,26 +211,27 @@ class Manager
     end
   end
 
-  def self.node_destroy_cloud_instances(count = 1)
-    $logger.info "#{@stamp} Destroying #{count} instances."
+  def self.node_destroy_cloud_instances(cloud_instances, count = 1)
     count.times do |n|
-      node_instance = @node_instances.reverse[n]
-        begin
-          @ec2.terminate_instances([node_instance['aws_instance']])
-        rescue Exception => e
-          $logger.error "#{@stamp} Exception: #{e.message}"
-        end
-        begin
-          @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance, operation: "destroy")
-        rescue Exception => e
-          $logger.error "#{@stamp} Exception: #{e.message}"
-        end
+      node_instance = cloud_instances.reverse[n]
+      node_destroy_cloud_instance(node_instance)
     end
   end
 
-  def self.node_instance_exec
-    @node_instances.each do |node_instance|
-      $logger.info "Executing commands on instance: #{node_instance['name']}"
+  def self.node_destroy_cloud_instance(node_instance)
+    $logger.info "#{@stamp} Attempting to destroy instance: #{node_instance['aws_instance']}"
+    begin
+      if @ec2.servers.destroy(node_instance['aws_instance'])
+        @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance, operation: "destroy")
+      end
+    rescue Exception => e
+      $logger.error "#{@stamp} Exception: #{e.message}"
+    end
+  end
+
+  def self.node_instance_exec(node_instances)
+    node_instances.each do |node_instance|
+      $logger.info "#{@stamp} Executing commands on instance: #{node_instance['name']}"
       if node_instance['execute'].is_a?(Array)
         node_instance['execute'].each do |command|
           $logger.info "#{@stamp} Executing \'#{command}\' on #{node_instance['aws_instance']}..."
@@ -246,7 +255,7 @@ class Manager
       end
     end
     begin
-      @node_platform_resource["nodes/#{@node['identifier']}/instances.json"].post(node_instances: @node_instances.to_json)
+      @node_platform_resource["nodes/#{@node['identifier']}/instances.json"].post(node_instances: node_instances.to_json)
     rescue Exception => e
       $logger.error "#{@stamp} Exception: #{e.message}"
     end
@@ -257,15 +266,14 @@ class Manager
     keypair_name = @node['identifier']
     keys = []
     begin
-      $logger.debug "#{@stamp} Attempting to retrieve keys..."
-      keys = @ec2.describe_key_pairs([keypair_name]).body['keySet']
+      $logger.debug "#{@stamp} Attempting to retrieve keypairs..."
+      keys = @ec2.key_pairs.all
+      key = keys.select { |k| k.name == keypair_name }.first
     rescue Exception => e
       $logger.error "#{@stamp} Exception: #{e.message}"
     end
-    $logger.debug "#{@stamp} FINGERPRINT: #{keys[0]['keyFingerprint']}"
-    if keys[0].try(:[], 'keyFingerprint') == @node['key_fingerprint']
-      key = keys[0]
-      $logger.debug "#{@stamp} Found valid key: #{key}"
+    if key && key.fingerprint == @node['key_fingerprint']
+      $logger.debug "#{@stamp} Found valid key: #{keypair_name}"
     else
       begin
         $logger.debug "#{@stamp} Deleting key: #{keypair_name}"
@@ -275,15 +283,15 @@ class Manager
       end
       begin
         $logger.debug "#{@stamp} Creating key: #{keypair_name}"
-        key = @ec2.create_key_pair(keypair_name).body
+        key = @ec2.key_pairs.create(name: keypair_name)
       rescue Exception => e
         $logger.error "#{@stamp} Exception: #{e.message}"
       end
       $logger.debug "#{@stamp} Using key: #{keypair_name}"
-      if key['keyMaterial']
+      if key && key.private_key
         @node_platform_resource["nodes/#{@node['identifier']}"].post(accept: :json,
-                                                                     key: key['keyMaterial'],
-                                                                     key_fingerprint: key['keyFingerprint'])
+                                                                     key: key.private_key,
+                                                                     key_fingerprint: key.fingerprint)
       end
     end
 
@@ -300,24 +308,23 @@ PROVISIONAL=\"true\"
         instance_options[:image_id] = @node_provider['aws_image'] if !@node_provider['aws_image'].empty?
         instance_options[:ramdisk_id] = @node_provider['aws_ramdisk'] if !@node_provider['aws_ramdisk'].empty?
         instance_options[:flavor_id] = @node_instance_type['name']
-        instance_options[:key_name] = key['keyName']
+        instance_options[:key_name] = key.name
         instance_options[:user_data] = user_data
       begin
-        aws_instance = @ec2.servers.create(instance_options)
-      rescue Exception => e
-        $logger.error "#{@stamp} Exception: #{e.message}"
-      end
-      $logger.debug "#{@stamp} NEW AWS INSTANCE: #{aws_instance.id}"
-      node_instance = {}
-      node_instance['name'] = aws_instance.id
-      node_instance['aws_instance'] = aws_instance.id
-      node_instance['cloud'] = true
-      node_instance['ip_private'] = aws_instance.private_ip_address
-      node_instance['ip_public'] = aws_instance.ip_address
-      node_instance['state'] = aws_instance.state
-      node_instance['started_at'] = aws_instance.created_at
-      begin
-        @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance)
+        if (aws_instance = @ec2.servers.create(instance_options))
+          $logger.debug "#{@stamp} Created new instance: #{aws_instance.id}"
+          node_instance = {}
+          node_instance['name'] = aws_instance.id
+          node_instance['aws_instance'] = aws_instance.id
+          node_instance['cloud'] = true
+          node_instance['ip_private'] = aws_instance.private_ip_address
+          node_instance['ip_public'] = aws_instance.ip_address
+          node_instance['state'] = aws_instance.state
+          node_instance['started_at'] = aws_instance.created_at
+          unless @node_platform_resource["nodes/#{@node['identifier']}/instance.json"].post(node_instance: node_instance)
+            @ec2.servers.destroy(aws_instance.id)
+          end
+        end
       rescue Exception => e
         $logger.error "#{@stamp} Exception: #{e.message}"
       end
