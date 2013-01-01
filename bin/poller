@@ -1,0 +1,12 @@
+#!/usr/bin/env ruby
+require 'daemons'
+basedir = File.join(File.dirname(__FILE__), '..')
+
+daemon_options = {
+  :app_name   => "poller",
+  :dir        => "#{basedir}/../tmp",
+  :log_dir    => "#{basedir}/../log",
+  :monitor    => true
+}
+
+Daemons.run("#{basedir}/lib/poller.rb", daemon_options)

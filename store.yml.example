@@ -1,0 +1,4 @@
+:verbose: false
+:concurrency:  3
+:queues:
+  - [store, 10]
