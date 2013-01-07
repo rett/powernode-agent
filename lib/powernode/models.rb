@@ -1,0 +1,7 @@
+require 'powernode/node'
+require 'powernode/node_instance'
+require 'powernode/node_instance_type'
+require 'powernode/node_module'
+require 'powernode/node_platform'
+require 'powernode/node_provider'
+require 'powernode/node_template'

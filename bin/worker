@@ -1,0 +1,95 @@
+#!/usr/bin/env sh
+
+WORKER="$(basename $0)"
+MANAGER="$(dirname $0)/../lib/${WORKER}.rb"
+CFGFILE="$(dirname $0)/../${WORKER}.yml"
+PIDFILE="$(dirname $0)/../tmp/${WORKER}.pid"
+
+pool_getpid()
+{
+  if [ -f "${PIDFILE}" ]; then
+    PID="$(cat $PIDFILE)"
+    if [ ! "$(ps aux | grep ${PID} | grep sidekiq 2>/dev/null)" ]; then
+      rm "${PIDFILE}"
+      unset PID
+    fi
+  else
+    unset PID
+  fi
+}
+
+pool_run()
+{
+  pool_getpid
+  if [ ! "${PID}" ]; then
+    echo "Running ${WORKER} pool..."
+    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r ${MANAGER}
+  fi
+}
+
+pool_start()
+{
+  pool_getpid
+  if [ ! "${PID}" ]; then
+    echo "Starting ${WORKER} pool..."
+    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r "${MANAGER}" &
+    while [ ! -f "${PIDFILE}" ]; do
+      pool_getpid
+      sleep 1
+    done
+  fi
+}
+
+pool_stop()
+{
+  pool_getpid
+  if [ "${PID}" ]; then
+    echo "Stopping ${WORKER} pool..."
+    kill -TERM $PID
+    echo "Waiting for workers to finish..."
+    while [ -f "${PIDFILE}" ]; do
+      pool_getpid
+      sleep 1
+    done
+  fi
+}
+
+pool_status()
+{
+  pool_getpid
+  if [ "${PID}" ]; then
+    echo "${WORKER}: running"
+  else
+    echo "${WORKER}: stopped"
+  fi
+}
+
+usage()
+{
+  echo "Usage: $(basename $0) [start|stop|restart|status]"
+}
+
+case "$1" in
+  start)
+    pool_start
+    pool_status
+    ;;
+  run)
+    pool_run
+    ;;
+  stop)
+    pool_stop
+    pool_status
+    ;;
+  restart)
+    pool_stop
+    pool_start
+    pool_status
+    ;;
+  status)
+    pool_status
+    ;;
+  *)
+    usage
+    ;;
+esac

@@ -1,9 +1,13 @@
 .bundle
 .idea
+*.crt
+*.csr
+*.key
+*.pem
 *.lic
+*.log*
+*.pid
 *.save
 *.yml
 Gemfile.lock
-log/
-tmp/pids/
 vendor/
