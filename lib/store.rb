@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 $:.unshift File.dirname(__FILE__)
-ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '../Gemfile')
+ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
 require 'rubygems'
 require 'bundler/setup'
@@ -18,6 +18,7 @@ require 'sidekiq'
 require 'sidekiq-unique-jobs'
 require 'tmpdir'
 require 'powernode'
+require 'powernode/models'
 
 class Store
   include Powernode
@@ -39,7 +40,7 @@ class Store
     @node_module = NodeModule.new(params['node_module'])
     @operation = params['operation']
     begin
-      @node_resource = RestClient::Resource.new(Powernode.config('parent') + '/api/v1/node',
+      @node_resource = RestClient::Resource.new(Powernode.config('parent_url') + '/api/v1/node',
                                                 Powernode.config('id'),
                                                 Powernode.config('key'))
       logger.info "Performing #{@operation} on module #{@node_module.id}..."

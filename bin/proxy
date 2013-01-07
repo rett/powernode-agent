@@ -4,9 +4,9 @@ basedir = File.join(File.dirname(__FILE__), '..')
 
 daemon_options = {
   :app_name   => "proxy",
-  :dir        => "#{basedir}/../tmp",
-  :log_dir    => "#{basedir}/../log",
+  :dir        => File.join(basedir, '..', 'tmp'),
+  :log_dir    => File.join(basedir, '..', 'log'),
   :monitor    => true
 }
 
-Daemons.run("#{basedir}/lib/proxy.rb", daemon_options)
+Daemons.run(File.join(basedir, 'lib', 'proxy.rb'), daemon_options)

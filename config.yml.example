@@ -1,13 +1,20 @@
 # Shared options
 id: 12345123-3456-012f-7654-1027e1212121
 key: secret_key
-parent: http://127.0.0.1:3000
+parent_url: http://127.0.0.1:3000
 realm: Node Alchemy
 checksum_bitlength: 256
 module_dir: /opt/powernode/store_modules
 log_cycle: daily
 log_dir: /opt/powernode/manager/log
 tmp_dir: /opt/powernode/manager/tmp
+ssl_chain_file: /opt/powernode/manager/certificate.pem
+ssl_key_file: /opt/powernode/manager/certificate.key
+
+# Encryption options
+encrypted_attributes: [ssh_key]
+encryption_cipher: aes-256-cbc
+encryption_key: insert_random_key_here
 
 # Redis configuration
 redis_server: redis://localhost:6379/0
@@ -21,6 +28,9 @@ poller_loglevel: debug
 # Proxy configuration
 proxy_logfile: proxy.log
 proxy_loglevel: debug
+proxy_port: 4567
+proxy_redirect: false
+proxy_url: http://dev-proxy.ipnode.net:4567
 
 # Manager configuration
 manager_queue: manager

@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 $:.unshift File.dirname(__FILE__)
-ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '../Gemfile')
+ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
 require 'rubygems'
 require 'bundler/setup'
@@ -10,6 +10,7 @@ require 'restclient'
 require 'sidekiq'
 require 'sidekiq-unique-jobs'
 require 'powernode'
+require 'powernode/models'
 require 'manager'
 
 Sidekiq.configure_client do |config|
@@ -33,7 +34,7 @@ class Poller
   end
 
   def poll
-    parent_resource = RestClient::Resource.new(Powernode.config('parent') + '/api/v1',
+    parent_resource = RestClient::Resource.new(Powernode.config('parent_url') + '/api/v1',
                                                Powernode.config('id'),
                                                Powernode.config('key'))
     begin

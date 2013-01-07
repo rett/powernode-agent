@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 $:.unshift File.dirname(__FILE__)
-ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '../Gemfile')
+ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
 require 'rubygems'
 require 'bundler/setup'
@@ -9,11 +9,13 @@ require 'fog'
 require 'json'
 require 'net/ssh'
 require 'net/sftp'
+require 'openssl'
 require 'restclient'
 require 'sidekiq'
 require 'sidekiq-unique-jobs'
 require 'tmpdir'
 require 'powernode'
+require 'powernode/models'
 
 class Manager
   include Powernode
@@ -35,7 +37,7 @@ class Manager
     params = ActiveSupport::JSON.decode(message)
     @operation = params['operation']
     @node = Node.new(params['node'])
-    @parent_resource = RestClient::Resource.new(Powernode.config('parent') + '/api/v1',
+    @parent_resource = RestClient::Resource.new(Powernode.config('parent_url') + '/api/v1',
                                                 Powernode.config('id'),
                                                 Powernode.config('key'))
     begin
@@ -56,7 +58,7 @@ class Manager
     instance_variance = @node.instance_count - @node.cloud_instances.count
     logger.info "#{@stamp} Instance variance: #{instance_variance}"
     begin
-      @parent_resource['node']["#{@node.id}.json"].put(poll: true)
+      @parent_resource['node']["#{@node.id}.json"].post(poll: true)
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
       # exit 1
@@ -112,7 +114,7 @@ class Manager
         end
         if @node_module_commit.is_a?(Array)
           @node_module_commit.each do |node_module_commit|
-            node_module = @node_modules.find { |m| m.id == node_module_commit }
+            node_module = NodeModule.new(JSON.parse(@parent_resource["node/module/#{node_module_commit}.json"].get))
             commit_node_module(node_module)
           end
         end
@@ -140,7 +142,7 @@ class Manager
         begin
           session = Net::SSH.start(node_instance.ip_private,
                                    @node.node_template.admin_user,
-                                   key_data: @node.key,
+                                   key_data: @node.ssh_key,
                                    paranoid: false)
         rescue Exception => e
           logger.error "#{@stamp} Exception: #{e.message}"
@@ -166,7 +168,7 @@ class Manager
     if node_instance && !node_module.effective_spec.empty?
       tmp_dir = Dir.mktmpdir
       FileUtils.chmod(0755, tmp_dir)
-      Net::SFTP.start(node_instance.ip_private, @node.node_template.admin_user, key_data: @node.key, paranoid: false) do |session|
+      Net::SFTP.start(node_instance.ip_private, @node.node_template.admin_user, key_data: @node.ssh_key, paranoid: false) do |session|
         node_module.effective_spec.each do |file|
           target_path = tmp_dir + file
           target_path.gsub!(/\/+/, '/')
@@ -204,12 +206,12 @@ class Manager
         FileUtils.remove_entry_secure tmp_dir
         logger.info "#{@stamp} Commit complete."
       else
-        logger.info "#{@stamp} Commit # exit 1ed."
+        logger.info "#{@stamp} Commit aborted."
       end
     elsif node_instance.nil?
-      logger.info "#{@stamp} Commit # exit 1ed: No primary instance found!"
+      logger.info "#{@stamp} Commit aborted: No primary instance found!"
     else
-      logger.info "#{@stamp} Commit # exit 1ed: No module specification!"
+      logger.info "#{@stamp} Commit aborted: No module specification!"
     end
   end
 
@@ -242,7 +244,7 @@ class Manager
           begin
             session = Net::SSH.start(node_instance.ip_private,
                                      @node_template.admin_user,
-                                     key_data: @node.key,
+                                     key_data: @node.ssh_key,
                                      paranoid: false)
           rescue Exception => e
             logger.error "#{@stamp} Exception: #{e.message}"
@@ -279,7 +281,7 @@ class Manager
       logger.error "#{@stamp} Exception: #{e.message}"
       # exit 1
     end
-    if key && key.fingerprint == @node.key_fingerprint
+    if key && key.fingerprint == @node.ssh_key_fingerprint
       logger.info "#{@stamp} Found valid key: #{keypair_name}"
     else
       begin
@@ -298,16 +300,18 @@ class Manager
       end
       logger.info "#{@stamp} Using key: #{keypair_name}"
       if key && key.private_key
-        @parent_resource["node/#{@node.id}"].post(key: key.private_key, key_fingerprint: key.fingerprint)
+        @node.ssh_key = key.private_key
+        @node.ssh_key_fingerprint = key.fingerprint
+        @parent_resource["node/#{@node.id}"].post(ssh_key: @node.raw_ssh_key, ssh_key_fingerprint: @node.ssh_key_fingerprint)
       end
     end
 
-    user_data = <<-END
+    user_data = <<END
 ID=\"#{@node.id}\"
-KEY=\"#{@node.key}\"
-PARENT=\"#{Powernode.config('parent')}\"
+KEY=\"#{Powernode.config('key')}\"
+PARENT=\"#{Powernode.config('proxy_url').nil? ? Powernode.config('parent_url') : Powernode.config('proxy_url')}\"
 PROVISIONAL=\"true\"
-    END
+END
 
     count.times do
       instance_options = {}
