@@ -9,5 +9,4 @@
 *.pid
 *.save
 *.yml
-Gemfile.lock
-vendor/
+vendor/cache
