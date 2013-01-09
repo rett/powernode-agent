@@ -6,7 +6,7 @@ module Powernode
       raise "expected Hash param" unless item.kind_of? Hash
       item.each do |key, value|
         if Powernode.config('encrypted_attributes').include?(key)
-          instance_variable_set(sanitize_key(key), encrypt(value))
+          instance_variable_set(sanitize_key(key), value)
           define_singleton_method(key.to_s) { decrypt(instance_variable_get(sanitize_key(key))) }
           define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), encrypt(val)) }
         else
@@ -41,7 +41,7 @@ module Powernode
     end
 
     def encrypt(data)
-      if Powernode.config('encryption_cipher') && Powernode.config('encryption_key')
+      if data && Powernode.config('encryption_cipher') && Powernode.config('encryption_key')
         cipher = OpenSSL::Cipher.new(Powernode.config('encryption_cipher'))
         cipher.encrypt
         cipher.key = Powernode.config('encryption_key')
@@ -63,7 +63,7 @@ module Powernode
   end
 
   def self.logger_init(file_name, cycle, log_level)
-    @logger = Logger.new(File.join(Powernode.config('log_dir'), file_name), cycle)
+    @logger = Logger.new(File.join(Powernode.config('log_path'), file_name), cycle)
     @logger.level = Logger.const_get(log_level.upcase)
     @logger
   end

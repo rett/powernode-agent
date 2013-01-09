@@ -65,7 +65,7 @@ class Proxy < Sinatra::Base
     if @node && @node_modules
       @node_modules.each do |node_module|
         if node_module.data_file_name
-          module_file_name = File.join(Powernode.config('module_dir'), node_module.data_file_name)
+          module_file_name = File.join(Powernode.config('module_path'), node_module.data_file_name)
           unless File.exist?(module_file_name) && node_module.checksum == Digest::SHA2.new(Powernode.config('checksum_bitlength') || 256).hexdigest(File.binread(module_file_name))
             node_module.status = 'WAIT'
             enqueue_message(@node, node_module, 'transfer')
@@ -74,7 +74,7 @@ class Proxy < Sinatra::Base
       end
       if params['node_module_id']
         if (node_module = @node_modules.select { |m| m.id == params['node_module_id'] }.first && node_module.data_file_name)
-          module_file_name = File.join(Powernode.config('module_dir'), node_module.data_file_name)
+          module_file_name = File.join(Powernode.config('module_path'), node_module.data_file_name)
           if node_module.status == 'READY'
             logger.info "Sending module: #{node_module.id}, #{module_file_name}"
             send_file(module_file_name)
@@ -119,7 +119,7 @@ class Proxy < Sinatra::Base
       parent_request = RestClient::Resource.new(Powernode.config('parent_url') + '/api/v1/' + params[:splat].join, node_id, key)
       begin
         logger.info "Resuest method: #{request.env["REQUEST_METHOD"]}"
-        method = clean_key(request.env["REQUEST_METHOD"].downcase)
+        method = request.env["REQUEST_METHOD"].gsub(/\W/, '').downcase.to_sym
         parent_request.send(method)
       end
     end

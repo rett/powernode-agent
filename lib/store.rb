@@ -51,10 +51,10 @@ class Store
   protected
 
   def do_transfer
-    module_file_name = "#{Powernode.config('module_dir')}/#{@node_module.data_file_name}"
+    module_file_name = "#{Powernode.config('module_path')}/#{@node_module.data_file_name}"
     logger.info "Attempting to download #{@node_module.data_file_name}..."
     begin
-      FileUtils.mkdir_p(Powernode.config('module_dir'))
+      FileUtils.mkdir_p(Powernode.config('module_path'))
       FileUtils.touch(module_file_name + '.tmp')
     rescue Exception => e
       logger.error "Exception: #{e}"

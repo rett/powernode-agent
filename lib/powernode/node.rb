@@ -16,4 +16,8 @@ class Node
   def physical_instances
     node_instances.select { |i| i.cloud == false } if self.respond_to?(:node_instances)
   end
+
+  def primary_instance
+    cloud_instances.select { |i| i.primary == true }.first if self.respond_to?(:node_instances)
+  end
 end
