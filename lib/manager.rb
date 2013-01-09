@@ -41,14 +41,14 @@ class Manager
                                                 Powernode.config('id'),
                                                 Powernode.config('key'))
     begin
-      node_response = JSON.parse(@parent_resource['node'][@node.id].get)
+      @node = Node.new(JSON.parse(@parent_resource["node/#{@node.id}.json"].get))
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
-      # exit 1
     end
-    @node = Node.new(node_response)
-    @stamp = "[#{@operation}:#{@node.id}]"
-    send("do_#{@operation}") if respond_to?("do_#{@operation.to_s}")
+    if @node
+      @stamp = "[#{@operation}:#{@node.id}]"
+      send("do_#{@operation}") if respond_to?("do_#{@operation.to_s}")
+    end
   end
 
   protected
@@ -61,7 +61,6 @@ class Manager
       @parent_resource['node']["#{@node.id}.json"].post(poll: true)
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
-      # exit 1
     end
     begin
       @ec2 = Fog::Compute.new(:provider => 'AWS',
@@ -70,7 +69,6 @@ class Manager
                               :aws_secret_access_key => @node.node_provider.aws_secret_key)
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
-      # exit 1
     end
     if @ec2
       if @node.enabled
@@ -78,29 +76,25 @@ class Manager
           @node.cloud_instances.each do |node_instance|
             begin
               aws_instance = @ec2.servers.get(node_instance.aws_instance)
+              aws_available = true
             rescue Exception => e
               logger.error "#{@stamp} Exception: #{e.message}"
-              # exit 1
             end
-            if aws_instance && aws_instance.flavor_id == @node.node_instance_type.name
-              logger.info "#{@stamp} Updating instance: #{aws_instance.id}"
-              node_instance.error_count = 0
-              node_instance.ip_private = aws_instance.private_ip_address
-              node_instance.ip_public = aws_instance.public_ip_address
-              node_instance.state = aws_instance.state
-              @parent_resource["node/#{@node.id}/instances.json"].post(node_instance: node_instance.to_json)
-            elsif aws_instance && aws_instance.flavor_id != @node.node_instance_type.name
-              logger.info "#{@stamp} Node instance type incorrect for instance: #{aws_instance.id}"
-              destroy_cloud_instance(node_instance)
-              launch_instances(1)
-            elsif node_instance.error_count < Powernode.config('manager_cloud_error_limit')
-              logger.info "#{@stamp} Incrementing error count for instance: #{node_instance.aws_instance}"
-              node_instance.error_count += 1
-              @parent_resource["node/#{@node.id}/instances.json"].post(node_instance: node_instance.to_json)
-            else
-              # Todo: Confirm before deregistering instance
-              logger.info "#{@stamp} Deregistering instance: #{node_instance.aws_instance}"
-              @parent_resource["node/#{@node.id}/instances.json"].delete(params: { node_instance: node_instance.to_json })
+            if aws_available
+              if aws_instance && aws_instance.flavor_id == @node.node_instance_type.name
+                logger.info "#{@stamp} Updating instance: #{aws_instance.id}"
+                node_instance.ip_private = aws_instance.private_ip_address
+                node_instance.ip_public = aws_instance.public_ip_address
+                node_instance.state = aws_instance.state
+                @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].post(node_instance: node_instance.to_json)
+              elsif aws_instance && aws_instance.flavor_id != @node.node_instance_type.name
+                logger.info "#{@stamp} Node instance type incorrect for instance: #{aws_instance.id}"
+                destroy_cloud_instance(node_instance)
+                launch_instances(1)
+              else
+                logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.aws_instance}"
+                @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
+              end
             end
           end
         end
@@ -112,9 +106,9 @@ class Manager
           logger.info "#{@stamp} Destroying #{instance_variance} instances."
           destroy_cloud_instances(@node.cloud_instances, instance_variance)
         end
-        if @node_module_commit.is_a?(Array)
-          @node_module_commit.each do |node_module_commit|
-            node_module = NodeModule.new(JSON.parse(@parent_resource["node/module/#{node_module_commit}.json"].get))
+        if @node.node_module_commit.is_a?(Array)
+          @node.node_module_commit.each do |node_module_commit|
+            node_module = NodeModule.new(JSON.parse(@parent_resource["node/#{@node.id}/module/#{node_module_commit}.json"].get))
             commit_node_module(node_module)
           end
         end
@@ -146,14 +140,12 @@ class Manager
                                    paranoid: false)
         rescue Exception => e
           logger.error "#{@stamp} Exception: #{e.message}"
-          # exit 1
         end
         if session
           begin
             session.exec!("sudo ipn -auv all")
           rescue Exception => e
             logger.error "#{@stamp} Exception: #{e.message}"
-            # exit 1
           end
         end
       end
@@ -164,51 +156,67 @@ class Manager
 
   def commit_node_module(node_module)
     logger.info "#{@stamp} Committing module #{node_module.id}."
-    node_instance = JSON.parse(@parent_resource["node/#{@node.id}/instances"].get(params: { criteria: :primary }))
-    if node_instance && !node_module.effective_spec.empty?
+    if @node.primary_instance && !node_module.effective_spec.empty?
       tmp_dir = Dir.mktmpdir
       FileUtils.chmod(0755, tmp_dir)
-      Net::SFTP.start(node_instance.ip_private, @node.node_template.admin_user, key_data: @node.ssh_key, paranoid: false) do |session|
-        node_module.effective_spec.each do |file|
-          target_path = tmp_dir + file
-          target_path.gsub!(/\/+/, '/')
-          file.gsub!(/\/+/, '/')
-          begin
-            case session.lstat!(file).type
-            when 1
-              # File discovered, create dir and download.
-              FileUtils.mkdir_p(target_path[0..target_path.rindex("/")])
-              session.download!(file, target_path)
-            when 2
-              # Directory discovered, create dir.
-              FileUtils.mkdir_p(target_path)
-            when 3
-              # Symlink discovered, create dir and symlink.
-              FileUtils.mkdir_p(target_path[0..target_path.rindex("/")])
-              FileUtils.ln_s(session.realpath!(file).name, target_path)
+      begin
+        Net::SFTP.start(@node.primary_instance.ip_private, @node.node_template.admin_user, key_data: @node.ssh_key, paranoid: false) do |session|
+          node_module.effective_spec.each do |file|
+            target_path = tmp_dir + file
+            target_path.gsub!(/\/+/, '/')
+            file.gsub!(/\/+/, '/')
+            begin
+              case session.lstat!(file).type
+              when 1
+                # File discovered, create dir and download.
+                FileUtils.mkdir_p(target_path[0..target_path.rindex("/")])
+                session.download!(file, target_path)
+              when 2
+                # Directory discovered, create dir.
+                FileUtils.mkdir_p(target_path)
+              when 3
+                # Symlink discovered, create dir and symlink.
+                FileUtils.mkdir_p(target_path[0..target_path.rindex("/")])
+                FileUtils.ln_s(session.realpath!(file).name, target_path)
+              end
+              FileUtils.chown(session.lstat!(file).attributes[:uid], session.lstat!(file).attributes[:gid], target_path)
+              FileUtils.chmod(session.lstat!(file).attributes[:permissions], target_path)
+            rescue Exception => e
+              logger.error "#{@stamp} Exception: #{e} on file: #{file}"
             end
-            FileUtils.chown(session.lstat!(file).attributes[:uid], session.lstat!(file).attributes[:gid], target_path)
-            FileUtils.chmod(session.lstat!(file).attributes[:permissions], target_path)
-          rescue Exception => e
-            logger.error "#{@stamp} Exception: #{e} on file: #{file}"
-            # exit 1
           end
         end
+      rescue Exception => e
+        logger.error "#{@stamp} Exception: #{e.message}"
+        FileUtils.remove_entry_secure(tmp_dir)
       end
-      tmp_module = Tempfile.new("module-#{@node.id}")
-      tmp_module.close
-      system("mksquashfs #{tmp_dir} #{tmp_module.path} -noappend")
-      if tmp_module.size > 0
-        @parent_resource["node/#{@node.id}/modules/#{node_module.id}.json"].post(
-          data: File.open(tmp_module),
-          multipart: true,
-          content_type: "application/octet-stream")
-        FileUtils.remove_entry_secure tmp_dir
-        logger.info "#{@stamp} Commit complete."
-      else
-        logger.info "#{@stamp} Commit aborted."
+      if File.directory?(tmp_dir)
+        tmp_module = Tempfile.new("module-#{@node.id}")
+        logger.info "Temp module before close: #{tmp_module}"
+        tmp_module.close
+        logger.info "Temp module: #{tmp_module}"
+        begin
+          system("mksquashfs #{tmp_dir} #{tmp_module.path} -noappend")
+        rescue Exception => e
+          logger.error "#{@stamp} Exception: #{e.message}"
+        end
+        if tmp_module.size > 0
+          begin
+            new_node_module = NodeModule.new(JSON.parse(@parent_resource["node/#{@node.id}/module/#{node_module.id}.json"].post(
+              data: File.open(tmp_module),
+              multipart: true,
+              content_type: 'application/octet-stream',
+              accept: :json)))
+          rescue Exception => e
+            logger.error "#{@stamp} Exception: #{e.message}"
+          end
+          FileUtils.remove_entry_secure(tmp_dir)
+          logger.info "#{@stamp} Commit complete for node module #{new_node_module.data_file_name}."
+        else
+          logger.info "#{@stamp} Commit aborted."
+        end
       end
-    elsif node_instance.nil?
+    elsif @node.primary_instance.nil?
       logger.info "#{@stamp} Commit aborted: No primary instance found!"
     else
       logger.info "#{@stamp} Commit aborted: No module specification!"
@@ -226,11 +234,10 @@ class Manager
     logger.info "#{@stamp} Destroying instance: #{node_instance.aws_instance}"
     begin
       if @ec2.servers.destroy(node_instance.aws_instance)
-        @parent_resource["node/#{@node.id}/instances.json"].delete(params: { node_instance: node_instance.to_json })
+        @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
       end
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
-      # exit 1
     end
   end
 
@@ -248,14 +255,12 @@ class Manager
                                      paranoid: false)
           rescue Exception => e
             logger.error "#{@stamp} Exception: #{e.message}"
-            # exit 1
           end
           if session
             begin
               session.exec!("sudo #{command}")
             rescue Exception => e
               logger.error "#{@stamp} Exception: #{e.message}"
-              # exit 1
             end
           end
         end
@@ -265,7 +270,6 @@ class Manager
       @parent_resource["node/#{@node.id}/instances.json"].post(node_instances: node_instances.to_json)
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
-      # exit 1
     end
   end
 
@@ -279,7 +283,6 @@ class Manager
       key = keys.select { |k| k.name == keypair_name }.first
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
-      # exit 1
     end
     if key && key.fingerprint == @node.ssh_key_fingerprint
       logger.info "#{@stamp} Found valid key: #{keypair_name}"
@@ -289,30 +292,34 @@ class Manager
         @ec2.delete_key_pair(keypair_name)
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
-        # exit 1
       end
       begin
         logger.info "#{@stamp} Creating key: #{keypair_name}"
         key = @ec2.key_pairs.create(name: keypair_name)
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
-        # exit 1
       end
       logger.info "#{@stamp} Using key: #{keypair_name}"
       if key && key.private_key
         @node.ssh_key = key.private_key
         @node.ssh_key_fingerprint = key.fingerprint
-        @parent_resource["node/#{@node.id}"].post(ssh_key: @node.raw_ssh_key, ssh_key_fingerprint: @node.ssh_key_fingerprint)
+        if @parent_resource["node/#{@node.id}"].post(ssh_key: @node.raw_ssh_key, ssh_key_fingerprint: @node.ssh_key_fingerprint)
+          if (ssh_key_path = Powernode.config('ssh_key_path'))
+            FileUtils.mkdir_p(ssh_key_path)
+            ssh_key_file = File.join(ssh_key_path, @node.id + '.pem')
+            FileUtils.touch(ssh_key_file)
+            FileUtils.chmod(0600, ssh_key_file)
+            File.open(ssh_key_file, 'w') { |f| f.write(@node.ssh_key) }
+          end
+        end
       end
     end
-
     user_data = <<END
 ID=\"#{@node.id}\"
 KEY=\"#{Powernode.config('key')}\"
 PARENT=\"#{Powernode.config('proxy_url').nil? ? Powernode.config('parent_url') : Powernode.config('proxy_url')}\"
 PROVISIONAL=\"true\"
 END
-
     count.times do
       instance_options = {}
       instance_options[:availability_zone] = @node.node_provider.aws_availability_zone if @node.node_provider.aws_availability_zone
@@ -331,13 +338,12 @@ END
                                              ip_public: aws_instance.public_ip_address,
                                              state: aws_instance.state,
                                              started_at: aws_instance.created_at })
-          unless @parent_resource["node/#{@node.id}/instances.json"].post(node_instance: node_instance.to_json)
+          unless @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
             @ec2.servers.destroy(aws_instance.id)
           end
         end
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
-        # exit 1
       end
     end
   end

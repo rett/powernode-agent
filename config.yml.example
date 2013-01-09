@@ -2,12 +2,14 @@
 id: 12345123-3456-012f-7654-1027e1212121
 key: secret_key
 parent_url: http://127.0.0.1:3000
+proxy_url: http://127.0.0.1:4567
 realm: Node Alchemy
 checksum_bitlength: 256
-module_dir: /opt/powernode/store_modules
+module_path: /opt/powernode/store_modules
 log_cycle: daily
-log_dir: /opt/powernode/manager/log
-tmp_dir: /opt/powernode/manager/tmp
+log_path: /opt/powernode/manager/log
+tmp_path: /opt/powernode/manager/tmp
+ssh_key_path: /opt/powernode/manager/keys
 ssl_chain_file: /opt/powernode/manager/certificate.pem
 ssl_key_file: /opt/powernode/manager/certificate.key
 
@@ -30,15 +32,14 @@ proxy_logfile: proxy.log
 proxy_loglevel: debug
 proxy_port: 4567
 proxy_redirect: false
-proxy_url: http://dev-proxy.ipnode.net:4567
 
 # Manager configuration
-manager_queue: manager
-manager_logfile: manager.log
-manager_loglevel: debug
+manager_cloud_error_limit: 3
 manager_job_expiration: 3600
 manager_job_retries: 0
-manager_cloud_error_limit: 3
+manager_logfile: manager.log
+manager_loglevel: debug
+manager_queue: manager
 
 # Store configuration
 store_queue: store
