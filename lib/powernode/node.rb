@@ -20,4 +20,12 @@ class Node
   def primary_instance
     cloud_instances.select { |i| i.primary == true }.first if self.respond_to?(:node_instances)
   end
+
+  def instance_variance
+    instance_count - cloud_instances.count
+  end
+
+  def ssh_key_file
+    File.join(Powernode.config('ssh_key_path'), "#{id}.pem")
+  end
 end

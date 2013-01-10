@@ -55,13 +55,16 @@ class Manager
 
   def do_poll_instances
     logger.info "#{@stamp} Performing cloud instance check."
-    instance_variance = @node.instance_count - @node.cloud_instances.count
-    logger.info "#{@stamp} Instance variance: #{instance_variance}"
+    logger.info "#{@stamp} Instance variance: #{@node.instance_variance}"
     begin
       @parent_resource['node']["#{@node.id}.json"].post(poll: true)
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
     end
+    do_trigger_update if @node.trigger_update && Time.parse(@node.trigger_update) < Time.now
+
+
+
     begin
       @ec2 = Fog::Compute.new(:provider => 'AWS',
                               :endpoint => @node.node_provider.aws_url,
@@ -82,6 +85,8 @@ class Manager
             end
             if aws_available
               if aws_instance && aws_instance.flavor_id == @node.node_instance_type.name
+                logger.info "#{@stamp} Executing commands on #{aws_instance.id}"
+                instance_exec(node_instance)
                 logger.info "#{@stamp} Updating instance: #{aws_instance.id}"
                 node_instance.ip_private = aws_instance.private_ip_address
                 node_instance.ip_public = aws_instance.public_ip_address
@@ -94,17 +99,17 @@ class Manager
               else
                 logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.aws_instance}"
                 @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
+                @node.node_instances.delete(node_instance)
               end
             end
           end
         end
-        if instance_variance > 0
-          logger.info "#{@stamp} Launching #{instance_variance} instances."
-          launch_instances(instance_variance)
-        elsif instance_variance < 0
-          instance_variance = instance_variance.abs
-          logger.info "#{@stamp} Destroying #{instance_variance} instances."
-          destroy_cloud_instances(@node.cloud_instances, instance_variance)
+        if @node.instance_variance > 0
+          logger.info "#{@stamp} Launching #{@node.instance_variance} instances."
+          launch_instances(@node.instance_variance)
+        elsif @node.instance_variance < 0
+          logger.info "#{@stamp} Destroying #{@node.instance_variance} instances."
+          destroy_cloud_instances(@node.cloud_instances, @node.instance_variance.abs)
         end
         if @node.node_module_commit.is_a?(Array)
           @node.node_module_commit.each do |node_module_commit|
@@ -131,7 +136,7 @@ class Manager
     if @node.enabled
       @parent_resource["node/#{@node.id}"].post(trigger_update: true)
       @node.node_instances.each do |node_instance|
-        logger.info "#{@stamp} Triggering update on instance: #{node_instance.aws_instance}."
+        logger.info "#{@stamp} Triggering update on instance: #{node_instance.aws_instance}.\n\n"
         @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
         begin
           session = Net::SSH.start(node_instance.ip_private,
@@ -160,43 +165,26 @@ class Manager
       tmp_dir = Dir.mktmpdir
       FileUtils.chmod(0755, tmp_dir)
       begin
-        Net::SFTP.start(@node.primary_instance.ip_private, @node.node_template.admin_user, key_data: @node.ssh_key, paranoid: false) do |session|
+        tmp_spec = Tempfile.new("spec-#{@node.id}-#{node_module.id}")
+        File.open(tmp_spec, 'w') do |f|
           node_module.effective_spec.each do |file|
-            target_path = tmp_dir + file
-            target_path.gsub!(/\/+/, '/')
-            file.gsub!(/\/+/, '/')
-            begin
-              case session.lstat!(file).type
-              when 1
-                # File discovered, create dir and download.
-                FileUtils.mkdir_p(target_path[0..target_path.rindex("/")])
-                session.download!(file, target_path)
-              when 2
-                # Directory discovered, create dir.
-                FileUtils.mkdir_p(target_path)
-              when 3
-                # Symlink discovered, create dir and symlink.
-                FileUtils.mkdir_p(target_path[0..target_path.rindex("/")])
-                FileUtils.ln_s(session.realpath!(file).name, target_path)
-              end
-              FileUtils.chown(session.lstat!(file).attributes[:uid], session.lstat!(file).attributes[:gid], target_path)
-              FileUtils.chmod(session.lstat!(file).attributes[:permissions], target_path)
-            rescue Exception => e
-              logger.error "#{@stamp} Exception: #{e} on file: #{file}"
-            end
+            f.write(file + "\n")
           end
         end
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
         FileUtils.remove_entry_secure(tmp_dir)
       end
+      begin
+        system("sudo rsync -a -e \"ssh -q -p #{Powernode.config('ssh_port')} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" --files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.ip_private}:/ #{tmp_dir}/")
+      rescue Exception => e
+        logger.error "#{@stamp} Exception: #{e.message}"
+      end
       if File.directory?(tmp_dir)
-        tmp_module = Tempfile.new("module-#{@node.id}")
-        logger.info "Temp module before close: #{tmp_module}"
+        tmp_module = Tempfile.new("module-#{@node.id}-#{node_module.id}")
         tmp_module.close
-        logger.info "Temp module: #{tmp_module}"
         begin
-          system("mksquashfs #{tmp_dir} #{tmp_module.path} -noappend")
+          system("sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config('module_compression')} -noappend -no-progress > /dev/null")
         rescue Exception => e
           logger.error "#{@stamp} Exception: #{e.message}"
         end
@@ -210,7 +198,8 @@ class Manager
           rescue Exception => e
             logger.error "#{@stamp} Exception: #{e.message}"
           end
-          FileUtils.remove_entry_secure(tmp_dir)
+          FileUtils.remove_entry_secure(tmp_dir, force: true)
+          FileUtils.remove_entry_secure(tmp_module, force: true)
           logger.info "#{@stamp} Commit complete for node module #{new_node_module.data_file_name}."
         else
           logger.info "#{@stamp} Commit aborted."
@@ -241,33 +230,30 @@ class Manager
     end
   end
 
-  def instance_exec(node_instances)
-    node_instances.each do |node_instance|
-      logger.info "#{@stamp} Executing commands on instance: #{node_instance.name}"
-      if node_instance.execute.is_a?(Array)
-        node_instance.execute.each do |command|
-          logger.info "#{@stamp} Executing \'#{command}\' on #{node_instance.aws_instance}..."
-          node_instance.execute.delete(command)
+  def instance_exec(node_instance)
+    if node_instance.execute.is_a?(Array)
+      node_instance.execute.each do |command|
+        logger.info "#{@stamp} Executing (#{command}) on #{node_instance.aws_instance}..."
+        node_instance.execute.delete(command)
+        begin
+          session = Net::SSH.start(node_instance.ip_private,
+                                   @node.admin_user,
+                                   key_data: @node.ssh_key,
+                                   paranoid: false)
+        rescue Exception => e
+          logger.error "#{@stamp} Exception: #{e.message}"
+        end
+        if session
           begin
-            session = Net::SSH.start(node_instance.ip_private,
-                                     @node_template.admin_user,
-                                     key_data: @node.ssh_key,
-                                     paranoid: false)
+            session.exec!("sudo #{command}")
           rescue Exception => e
             logger.error "#{@stamp} Exception: #{e.message}"
-          end
-          if session
-            begin
-              session.exec!("sudo #{command}")
-            rescue Exception => e
-              logger.error "#{@stamp} Exception: #{e.message}"
-            end
           end
         end
       end
     end
     begin
-      @parent_resource["node/#{@node.id}/instances.json"].post(node_instances: node_instances.to_json)
+      @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
     end
@@ -306,10 +292,9 @@ class Manager
         if @parent_resource["node/#{@node.id}"].post(ssh_key: @node.raw_ssh_key, ssh_key_fingerprint: @node.ssh_key_fingerprint)
           if (ssh_key_path = Powernode.config('ssh_key_path'))
             FileUtils.mkdir_p(ssh_key_path)
-            ssh_key_file = File.join(ssh_key_path, @node.id + '.pem')
-            FileUtils.touch(ssh_key_file)
-            FileUtils.chmod(0600, ssh_key_file)
-            File.open(ssh_key_file, 'w') { |f| f.write(@node.ssh_key) }
+            FileUtils.touch(@node.ssh_key_file)
+            FileUtils.chmod(0600, @node.ssh_key_file)
+            File.open(@node.ssh_key_file, 'w') { |f| f.write(@node.ssh_key) }
           end
         end
       end
