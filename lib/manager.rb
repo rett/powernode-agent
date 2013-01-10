@@ -148,7 +148,7 @@ class Manager
         end
         if session
           begin
-            session.exec!("sudo ipn -auv all")
+            session.exec!("sudo /usr/sbin/ipn.sh -au all")
           rescue Exception => e
             logger.error "#{@stamp} Exception: #{e.message}"
           end
