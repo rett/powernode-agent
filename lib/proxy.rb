@@ -20,10 +20,10 @@ require 'thin'
 require 'powernode'
 require 'powernode/models'
 
-Powernode.logger_init(Powernode.config('proxy_logfile'), Powernode.config('log_cycle'), Powernode.config('proxy_loglevel'))
+Powernode.logger_init(Powernode.config(:proxy_logfile), Powernode.config(:log_cycle), Powernode.config(:proxy_loglevel))
 
 Sidekiq.configure_client do |config|
-  config.redis = { namespace: Powernode.config('redis_namespace'), url: Powernode.config('redis_server') }
+  config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
 end
 
 Redis.current = Sidekiq::RedisConnection
@@ -39,11 +39,11 @@ class Proxy < Sinatra::Base
   end
 
   def self.run!
-    rack_handler_config = { Host: Powernode.config('proxy_ip'),
-                            Port: Powernode.config('proxy_port') }
+    rack_handler_config = { Host: Powernode.config(:proxy_ip),
+                            Port: Powernode.config(:proxy_port) }
     ssl_options = {
-      cert_chain_file: File.join(Powernode.config('ssl_chain_file')),
-      private_key_file: File.join(Powernode.config('ssl_key_file'))
+      cert_chain_file: File.join(Powernode.config(:ssl_chain_file)),
+      private_key_file: File.join(Powernode.config(:ssl_key_file))
     }
     Rack::Handler::Thin.run(self, rack_handler_config) do |server|
       server.ssl = true
@@ -54,7 +54,7 @@ class Proxy < Sinatra::Base
   get '/api/v1/node/modules.csv', '/api/v1/node/module/:node_module_id.html' do
     auth = Rack::Auth::Basic::Request.new(@env)
     id, key = auth.credentials
-    parent_resource = RestClient::Resource.new(Powernode.config('parent_url') + '/api/v1/node', id, key)
+    parent_resource = RestClient::Resource.new(Powernode.config(:parent_url) + '/api/v1/node', id, key)
     begin
       @node = Node.new(JSON.parse(parent_resource.get(params: { brief: true })))
       @node_modules = JSON.parse(parent_resource['modules'].get).collect { |m| NodeModule.new(m) }
@@ -65,8 +65,8 @@ class Proxy < Sinatra::Base
     if @node && @node_modules
       @node_modules.each do |node_module|
         if node_module.data_file_name
-          module_file_name = File.join(Powernode.config('module_path'), node_module.data_file_name)
-          unless File.exist?(module_file_name) && node_module.checksum == Digest::SHA2.new(Powernode.config('checksum_bitlength') || 256).hexdigest(File.binread(module_file_name))
+          module_file_name = File.join(Powernode.config(:module_path), node_module.data_file_name)
+          unless File.exist?(module_file_name) && node_module.checksum == Digest::SHA2.new(Powernode.config(:checksum_bitlength) || 256).hexdigest(File.binread(module_file_name))
             node_module.status = 'WAIT'
             enqueue_message(@node, node_module, 'transfer')
           end
@@ -74,7 +74,7 @@ class Proxy < Sinatra::Base
       end
       if params['node_module_id']
         if (node_module = @node_modules.select { |m| m.id == params['node_module_id'] }.first && node_module.data_file_name)
-          module_file_name = File.join(Powernode.config('module_path'), node_module.data_file_name)
+          module_file_name = File.join(Powernode.config(:module_path), node_module.data_file_name)
           if node_module.status == 'READY'
             logger.info "Sending module: #{node_module.id}, #{module_file_name}"
             send_file(module_file_name)
@@ -106,17 +106,17 @@ class Proxy < Sinatra::Base
   end
 
   route :get, :post, '/api/v1/*' do |path|
-    if Powernode.config('proxy_redirect') == 'true'
-      logger.info "Redirecting request to #{Powernode.config('parent_url')}/api/v1/#{path}."
+    if Powernode.config(:proxy_redirect) == 'true'
+      logger.info "Redirecting request to #{Powernode.config(:parent_url)}/api/v1/#{path}."
       begin
-        redirect Powernode.config('parent_url') + "/api/v1/#{path}"
+        redirect Powernode.config(:parent_url) + "/api/v1/#{path}"
       rescue => e
         logger.error "Exception: #{e.message}"
       end
     else
       auth = Rack::Auth::Basic::Request.new(@env)
       node_id, key = auth.credentials
-      parent_request = RestClient::Resource.new(Powernode.config('parent_url') + '/api/v1/' + params[:splat].join, node_id, key)
+      parent_request = RestClient::Resource.new(Powernode.config(:parent_url) + '/api/v1/' + params[:splat].join, node_id, key)
       begin
         logger.info "Resuest method: #{request.env["REQUEST_METHOD"]}"
         method = request.env["REQUEST_METHOD"].gsub(/\W/, '').downcase.to_sym

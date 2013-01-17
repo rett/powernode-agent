@@ -5,18 +5,31 @@ parent_url: http://127.0.0.1:3000
 proxy_url: http://127.0.0.1:4567
 realm: Node Alchemy
 checksum_bitlength: 256
+module_compression: xz
 module_path: /opt/powernode/store_modules
 log_cycle: daily
 log_path: /opt/powernode/manager/log
 tmp_path: /opt/powernode/manager/tmp
-ssh_key_path: /opt/powernode/manager/keys
+
+smtp_from_email: support@nodealchemy.com
+smtp_server: mail.powernode.net
+smtp_port: 25
+smtp_domain: nodealchemy.com
+smtp_user_name:
+smtp_password:
+smtp_authentication:
+emtp_enable_starttls_auto: true
+
 ssl_chain_file: /opt/powernode/manager/certificate.pem
 ssl_key_file: /opt/powernode/manager/certificate.key
+ssh_key_path: /opt/powernode/manager/keys
+ssh_port: 22
 
 # Encryption options
 encrypted_attributes: [ssh_key]
 encryption_cipher: aes-256-cbc
 encryption_key: insert_random_key_here
+encryption_key_length: 64
 
 # Redis configuration
 redis_server: redis://localhost:6379/0
@@ -32,6 +45,10 @@ proxy_logfile: proxy.log
 proxy_loglevel: debug
 proxy_port: 4567
 proxy_redirect: false
+
+# Mailer configuration
+mailer_log_file: mailer.log
+mailer_log_level: debug
 
 # Manager configuration
 manager_cloud_error_limit: 3
