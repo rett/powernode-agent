@@ -22,10 +22,10 @@ class Node
   end
 
   def instance_variance
-    instance_count - cloud_instances.count
+    self.respond_to?(:instance_count) ? instance_count - cloud_instances.count : 0
   end
 
   def ssh_key_file
-    File.join(Powernode.config('ssh_key_path'), "#{id}.pem")
+    File.join(Powernode.config(:ssh_key_path), "#{id}.pem")
   end
 end

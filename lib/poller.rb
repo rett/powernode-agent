@@ -14,12 +14,12 @@ require 'powernode/models'
 require 'manager'
 
 Sidekiq.configure_client do |config|
-  config.redis = { namespace: Powernode.config('redis_namespace'), url: Powernode.config('redis_server') }
+  config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
 end
 
 class Poller
   include Powernode
-  Powernode.logger_init(Powernode.config('poller_logfile'), Powernode.config('log_cycle'), Powernode.config('poller_loglevel'))
+  Powernode.logger_init(Powernode.config(:poller_logfile), Powernode.config(:poller_loglevel))
 
   def initialize
     trap('INT') do
@@ -34,22 +34,22 @@ class Poller
   end
 
   def poll
-    parent_resource = RestClient::Resource.new(Powernode.config('parent_url') + '/api/v1',
-                                               Powernode.config('id'),
-                                               Powernode.config('key'))
+    parent_resource = RestClient::Resource.new(Powernode.config(:parent_url) + '/api/v1',
+                                               Powernode.config(:id),
+                                               Powernode.config(:key))
     begin
       nodes = JSON.parse(parent_resource['nodes'].get).collect { |n| Node.new(n) }
     rescue => e
       logger.error "Exception: #{e.message}"
     end
     nodes.is_a?(Array) && nodes.each do |node|
-      enqueue_message(:poll_instances, node)
+      enqueue_message(:poll_node, node)
     end
-    sleep Powernode.config('poller_interval')
+    sleep Powernode.config(:poller_interval)
   end
 
-  def enqueue_message(operation, node)
-    message = ActiveSupport::JSON.encode({ operation: operation, node: { id: node.id } })
+  def enqueue_message(command, node)
+    message = ActiveSupport::JSON.encode({ 'command' => command, params: { 'node_id' => node.id } })
     logger.info "Queued #{operation} for node #{node.id}." if Manager.perform_async(message)
   end
 end

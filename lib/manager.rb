@@ -10,6 +10,7 @@ require 'json'
 require 'net/ssh'
 require 'net/sftp'
 require 'openssl'
+require 'pony'
 require 'restclient'
 require 'sidekiq'
 require 'sidekiq-unique-jobs'
@@ -21,145 +22,104 @@ class Manager
   include Powernode
   include Sidekiq::Worker
 
-  Powernode.logger_init(Powernode.config('manager_logfile'), Powernode.config('log_cycle'), Powernode.config('manager_loglevel'))
+  Pony.options = { from: Powernode.config(:smtp_from_email), via: :smtp,
+                     via_options: { address:              Powernode.config(:smtp_server),
+                                    port:                 Powernode.config(:smtp_port),
+                                    domain:               Powernode.config(:smtp_domain),
+                                    user_name:            Powernode.config(:smtp_user_name),
+                                    password:             Powernode.config(:smtp_password),
+                                    authentication:       Powernode.config(:smtp_authentication),
+                                    enable_starttls_auto: Powernode.config(:smtp_enable_starttls_auto) } }
+
+  Powernode.logger_init(Powernode.config(:manager_logfile), Powernode.config(:manager_loglevel))
 
   Sidekiq.configure_server do |config|
     config.logger = Powernode.logger
-    config.redis = { namespace: Powernode.config('redis_namespace'), url: Powernode.config('redis_server') }
+    config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
   end
 
-  sidekiq_options queue: Powernode.config('manager_queue'),
-                  retry: Powernode.config('job_retries'),
+  sidekiq_options queue: Powernode.config(:manager_queue),
+                  retry: Powernode.config(:job_retries),
                   unique: true,
-                  unique_job_expiration: Powernode.config('manager_job_expiration')
+                  unique_job_expiration: Powernode.config(:manager_job_expiration)
 
   def perform(message)
-    params = ActiveSupport::JSON.decode(message)
-    @operation = params['operation']
-    @node = Node.new(params['node'])
-    @parent_resource = RestClient::Resource.new(Powernode.config('parent_url') + '/api/v1',
-                                                Powernode.config('id'),
-                                                Powernode.config('key'))
+    operation = ActiveSupport::JSON.decode(message)
+    command = operation['command']
+    params = operation['params']
+    node_id = params['node_id']
+    @parent_resource = RestClient::Resource.new(Powernode.config(:parent_url) + '/api/v1',
+                                                Powernode.config(:id),
+                                                Powernode.config(:key))
     begin
-      @node = Node.new(JSON.parse(@parent_resource["node/#{@node.id}.json"].get))
+      @node = Node.new(JSON.parse(@parent_resource["node/#{node_id}.json"].get))
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
     end
     if @node
-      @stamp = "[#{@operation}:#{@node.id}]"
-      send("do_#{@operation}") if respond_to?("do_#{@operation.to_s}")
+      @ec2 = Fog::Compute.new(:provider => 'AWS',
+                              :endpoint => @node.node_provider.aws_url,
+                              :aws_access_key_id => @node.node_provider.aws_access_key,
+                              :aws_secret_access_key => @node.node_provider.aws_secret_key)
+      @stamp = "[#{command}:#{@node.id}]"
+      send("do_#{command}", params) if respond_to?("do_#{command.to_s}")
     end
   end
 
   protected
 
-  def do_poll_instances
-    logger.info "#{@stamp} Performing cloud instance check."
-    logger.info "#{@stamp} Instance variance: #{@node.instance_variance}"
-    begin
-      @parent_resource['node']["#{@node.id}.json"].post(poll: true)
-    rescue Exception => e
-      logger.error "#{@stamp} Exception: #{e.message}"
-    end
-    do_trigger_update if @node.trigger_update && Time.parse(@node.trigger_update) < Time.now
-
-
-
-    begin
-      @ec2 = Fog::Compute.new(:provider => 'AWS',
-                              :endpoint => @node.node_provider.aws_url,
-                              :aws_access_key_id => @node.node_provider.aws_access_key,
-                              :aws_secret_access_key => @node.node_provider.aws_secret_key)
-    rescue Exception => e
-      logger.error "#{@stamp} Exception: #{e.message}"
-    end
-    if @ec2
-      if @node.enabled
-        if @node.cloud_instances.count > 0
-          @node.cloud_instances.each do |node_instance|
-            begin
-              aws_instance = @ec2.servers.get(node_instance.aws_instance)
-              aws_available = true
-            rescue Exception => e
-              logger.error "#{@stamp} Exception: #{e.message}"
-            end
-            if aws_available
-              if aws_instance && aws_instance.flavor_id == @node.node_instance_type.name
-                logger.info "#{@stamp} Executing commands on #{aws_instance.id}"
-                instance_exec(node_instance)
-                logger.info "#{@stamp} Updating instance: #{aws_instance.id}"
-                node_instance.ip_private = aws_instance.private_ip_address
-                node_instance.ip_public = aws_instance.public_ip_address
-                node_instance.state = aws_instance.state
-                @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].post(node_instance: node_instance.to_json)
-              elsif aws_instance && aws_instance.flavor_id != @node.node_instance_type.name
-                logger.info "#{@stamp} Node instance type incorrect for instance: #{aws_instance.id}"
-                destroy_cloud_instance(node_instance)
-                launch_instances(1)
-              else
-                logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.aws_instance}"
-                @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
-                @node.node_instances.delete(node_instance)
-              end
-            end
-          end
-        end
-        if @node.instance_variance > 0
-          logger.info "#{@stamp} Launching #{@node.instance_variance} instances."
-          launch_instances(@node.instance_variance)
-        elsif @node.instance_variance < 0
-          logger.info "#{@stamp} Destroying #{@node.instance_variance} instances."
-          destroy_cloud_instances(@node.cloud_instances, @node.instance_variance.abs)
-        end
-        if @node.node_module_commit.is_a?(Array)
-          @node.node_module_commit.each do |node_module_commit|
-            node_module = NodeModule.new(JSON.parse(@parent_resource["node/#{@node.id}/module/#{node_module_commit}.json"].get))
-            commit_node_module(node_module)
-          end
-        end
-      elsif @node.cloud_instances.count > 0
-        destroy_cloud_instances(@node.cloud_instances, @node.cloud_instances.count)
-      end
-    end
-    logger.info "#{@stamp} Cloud instance check complete."
+  def do_poll_node(params)
+    do_operations(params)
+    poll_cloud_instances
+    poll_physical_instances
   end
 
-  def do_poll_physical_instances
-    logger.info "#{@stamp} Performing physical instance check."
-    @node.physical_instances.each do |node_instance|
-      logger.info "#{@stamp} Checking physical instance #{node_instance.id}"
-    end
-    logger.info "#{@stamp} Physical instance check complete."
-  end
-
-  def do_trigger_update
-    if @node.enabled
-      @parent_resource["node/#{@node.id}"].post(trigger_update: true)
-      @node.node_instances.each do |node_instance|
-        logger.info "#{@stamp} Triggering update on instance: #{node_instance.aws_instance}.\n\n"
-        @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
-        begin
-          session = Net::SSH.start(node_instance.ip_private,
-                                   @node.node_template.admin_user,
-                                   key_data: @node.ssh_key,
-                                   paranoid: false)
-        rescue Exception => e
-          logger.error "#{@stamp} Exception: #{e.message}"
-        end
-        if session
-          begin
-            session.exec!("sudo /usr/sbin/ipn.sh -au all")
-          rescue Exception => e
-            logger.error "#{@stamp} Exception: #{e.message}"
-          end
+  def do_operations(params)
+    if @node.operations.is_a?(Array) && @node.operations.count > 0
+      @node.operations.each do |operation|
+        command = operation['command']
+        params = operation['params']
+        if params['scheduled_at'].empty? || (params['scheduled_at'] && Time.parse(params['scheduled_at']) < Time.now)
+          logger.info "#{@stamp} Performing command: #{command} on node #{@node.id}."
+          send("do_#{command}", params) if respond_to?("do_#{command}")
+          @parent_resource['node']["#{@node.id}.json"].post(command: command, params: params)
         end
       end
     end
   end
 
-  private
+  def do_instance_exec(params)
+    exec = params['exec']
+    node_instance_id = params['node_instance_id']
+    node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
+    logger.info "#{@stamp} Executing (#{exec}) on #{node_instance.aws_instance}..."
+    begin
+      session = Net::SSH.start(node_instance.ip_private,
+                               @node.admin_user,
+                               key_data: @node.ssh_key,
+                               paranoid: false)
+    rescue Exception => e
+      logger.error "#{@stamp} Exception: #{e.message}"
+    end
+    if session
+      begin
+        session.exec!("sudo #{exec}")
+      rescue Exception => e
+        logger.error "#{@stamp} Exception: #{e.message}"
+      end
+    end
+  end
 
-  def commit_node_module(node_module)
+  def do_instance_terminate(params)
+    node_instance_id = params['node_instance_id']
+    node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
+    logger.info "#{@stamp} Terminating instance #{node_instance.aws_instance}..."
+    destroy_cloud_instance(node_instance)
+  end
+
+  def do_node_module_commit(params)
+    node_module_id = params['node_module_id']
+    node_module = NodeModule.new(JSON.parse(@parent_resource["node/#{@node.id}/module/#{node_module_id}.json"].get))
     logger.info "#{@stamp} Committing module #{node_module.id}."
     if @node.primary_instance && !node_module.effective_spec.empty?
       tmp_dir = Dir.mktmpdir
@@ -167,8 +127,8 @@ class Manager
       begin
         tmp_spec = Tempfile.new("spec-#{@node.id}-#{node_module.id}")
         File.open(tmp_spec, 'w') do |f|
-          node_module.effective_spec.each do |file|
-            f.write(file + "\n")
+          node_module.effective_spec.each do |l|
+            f.write(Base64.decode64(l) + "\n")
           end
         end
       rescue Exception => e
@@ -176,7 +136,7 @@ class Manager
         FileUtils.remove_entry_secure(tmp_dir)
       end
       begin
-        system("sudo rsync -a -e \"ssh -q -p #{Powernode.config('ssh_port')} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" --files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.ip_private}:/ #{tmp_dir}/")
+        system("sudo rsync -lptgoDH -e \"ssh -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" --files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.ip_private}:/ #{tmp_dir}/")
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
       end
@@ -184,7 +144,7 @@ class Manager
         tmp_module = Tempfile.new("module-#{@node.id}-#{node_module.id}")
         tmp_module.close
         begin
-          system("sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config('module_compression')} -noappend -no-progress > /dev/null")
+          system("sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config(:module_compression)} -noappend -no-progress > /dev/null")
         rescue Exception => e
           logger.error "#{@stamp} Exception: #{e.message}"
         end
@@ -212,6 +172,67 @@ class Manager
     end
   end
 
+  def do_send_ssh_key(params)
+    recipient = params['recipient']
+    encryption_key = params['encryption_key']
+    logger.info "#{@stamp} Delivering SSH key to #{recipient}."
+    if encryption_key && encryption_key.is_a?(String) && encryption_key.length == Powernode.config(:encryption_key_length)
+      encryption_key = [encryption_key].pack('H*')
+      cipher = OpenSSL::Cipher.new(Powernode.config(:encryption_cipher))
+      cipher.encrypt
+      cipher.key = encryption_key
+      iv = cipher.random_iv
+      encrypted_ssh_key = Base64.encode64(cipher.update(@node.ssh_key) + cipher.final)
+    else
+      encrypted_ssh_key = @node.ssh_key
+    end
+    body =<<END
+Here is your SSH key for the node named #{@node.name}.
+#{iv ? "You must decrypt it with the following command:\n\nopenssl #{Powernode.config(:encryption_cipher)} -base64 -d -in #{@node.name + '.pem'} -iv #{iv.unpack('H*')[0]} -K [insert your key here]\n" : ""}
+Thanks,
+Node Alchemy
+END
+    begin
+      Pony.mail(
+        to: recipient,
+        subject: "SSH key for #{@node.name}",
+        body: body,
+        attachments: { "#{@node.name}.pem" => encrypted_ssh_key },
+        headers: { "Content-Type" => "multipart/mixed", "Content-Transfer-Encoding" => "base64", "Content-Disposition" => "attachment" },
+      )
+    rescue Exception => e
+      logger.error "#{@stamp} Exception: #{e.message}"
+    end
+  end
+
+  def do_update_cloud_instances(params)
+    if @node.enabled
+      @node.cloud_instances.each do |node_instance|
+        logger.info "#{@stamp} Triggering update on instance: #{node_instance.aws_instance}.\n\n"
+        if node_instance.ip_private && @node.ssh_key
+          begin
+            session = Net::SSH.start(node_instance.ip_private,
+                                     @node.node_template.admin_user,
+                                     key_data: @node.ssh_key,
+                                     paranoid: false)
+          rescue Exception => e
+            logger.error "#{@stamp} Exception: #{e.message}"
+          end
+          if session
+            begin
+              session.exec!("sudo /usr/sbin/ipn -u")
+            rescue Exception => e
+              logger.error "#{@stamp} Exception: #{e.message}"
+            end
+          end
+          @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
+        end
+      end
+    end
+  end
+
+  private
+
   def destroy_cloud_instances(cloud_instances, count)
     count.times do |n|
       node_instance = cloud_instances.reverse[n]
@@ -224,36 +245,8 @@ class Manager
     begin
       if @ec2.servers.destroy(node_instance.aws_instance)
         @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
+        @node.node_instances.delete_if { |i| i.id == node_instance.id }
       end
-    rescue Exception => e
-      logger.error "#{@stamp} Exception: #{e.message}"
-    end
-  end
-
-  def instance_exec(node_instance)
-    if node_instance.execute.is_a?(Array)
-      node_instance.execute.each do |command|
-        logger.info "#{@stamp} Executing (#{command}) on #{node_instance.aws_instance}..."
-        node_instance.execute.delete(command)
-        begin
-          session = Net::SSH.start(node_instance.ip_private,
-                                   @node.admin_user,
-                                   key_data: @node.ssh_key,
-                                   paranoid: false)
-        rescue Exception => e
-          logger.error "#{@stamp} Exception: #{e.message}"
-        end
-        if session
-          begin
-            session.exec!("sudo #{command}")
-          rescue Exception => e
-            logger.error "#{@stamp} Exception: #{e.message}"
-          end
-        end
-      end
-    end
-    begin
-      @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
     end
@@ -290,7 +283,7 @@ class Manager
         @node.ssh_key = key.private_key
         @node.ssh_key_fingerprint = key.fingerprint
         if @parent_resource["node/#{@node.id}"].post(ssh_key: @node.raw_ssh_key, ssh_key_fingerprint: @node.ssh_key_fingerprint)
-          if (ssh_key_path = Powernode.config('ssh_key_path'))
+          if (ssh_key_path = Powernode.config(:ssh_key_path))
             FileUtils.mkdir_p(ssh_key_path)
             FileUtils.touch(@node.ssh_key_file)
             FileUtils.chmod(0600, @node.ssh_key_file)
@@ -301,9 +294,9 @@ class Manager
     end
     user_data = <<END
 ID=\"#{@node.id}\"
-KEY=\"#{Powernode.config('key')}\"
-PARENT=\"#{Powernode.config('proxy_url').nil? ? Powernode.config('parent_url') : Powernode.config('proxy_url')}\"
-PROVISIONAL=\"true\"
+KEY=\"#{Powernode.config(:key)}\"
+PARENT=\"#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}\"
+PROVISIONAL=\"false\"
 END
     count.times do
       instance_options = {}
@@ -331,5 +324,64 @@ END
         logger.error "#{@stamp} Exception: #{e.message}"
       end
     end
+  end
+
+  def poll_cloud_instances
+    logger.info "#{@stamp} Performing cloud instance check."
+    logger.info "#{@stamp} Instance variance: #{@node.instance_variance}"
+    begin
+      @parent_resource['node']["#{@node.id}.json"].post(poll: true)
+    rescue Exception => e
+      logger.error "#{@stamp} Exception: #{e.message}"
+    end
+    if @ec2
+      if @node.enabled
+        if @node.cloud_instances.count > 0
+          @node.cloud_instances.each do |node_instance|
+            begin
+              aws_instance = @ec2.servers.get(node_instance.aws_instance)
+              aws_available = true
+            rescue Exception => e
+              logger.error "#{@stamp} Exception: #{e.message}"
+            end
+            if aws_available
+              if aws_instance && aws_instance.flavor_id == @node.node_instance_type.name
+                logger.info "#{@stamp} Updating instance: #{aws_instance.id}"
+                node_instance.ip_private = aws_instance.private_ip_address
+                node_instance.ip_public = aws_instance.public_ip_address
+                node_instance.state = aws_instance.state
+                @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].post(node_instance: node_instance.to_json)
+              elsif aws_instance && aws_instance.flavor_id != @node.node_instance_type.name
+                logger.info "#{@stamp} Node instance type incorrect for instance: #{aws_instance.id}"
+                destroy_cloud_instance(node_instance)
+                launch_instances(1)
+              else
+                logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.aws_instance}"
+                @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
+                @node.node_instances.delete(node_instance)
+              end
+            end
+          end
+        end
+        if @node.instance_variance > 0
+          logger.info "#{@stamp} Launching #{@node.instance_variance} instances."
+          launch_instances(@node.instance_variance)
+        elsif @node.instance_variance < 0
+          logger.info "#{@stamp} Destroying #{@node.instance_variance} instances."
+          destroy_cloud_instances(@node.cloud_instances, @node.instance_variance.abs)
+        end
+      elsif @node.cloud_instances.count > 0
+        destroy_cloud_instances(@node.cloud_instances, @node.cloud_instances.count)
+      end
+    end
+    logger.info "#{@stamp} Cloud instance check complete."
+  end
+
+  def poll_physical_instances
+    logger.info "#{@stamp} Performing physical instance check."
+    @node.physical_instances.each do |node_instance|
+      logger.info "#{@stamp} Checking physical instance #{node_instance.id}"
+    end
+    logger.info "#{@stamp} Physical instance check complete."
   end
 end
