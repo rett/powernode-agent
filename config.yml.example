@@ -18,7 +18,7 @@ smtp_domain: nodealchemy.com
 smtp_user_name:
 smtp_password:
 smtp_authentication:
-emtp_enable_starttls_auto: true
+smtp_enable_starttls_auto: true
 
 ssl_chain_file: /opt/powernode/manager/certificate.pem
 ssl_key_file: /opt/powernode/manager/certificate.key
@@ -26,10 +26,11 @@ ssh_key_path: /opt/powernode/manager/keys
 ssh_port: 22
 
 # Encryption options
-encrypted_attributes: [ssh_key]
+encrypted_attributes: [aws_secret_access_key, ssh_key]
 encryption_cipher: aes-256-cbc
 encryption_key: insert_random_key_here
 encryption_key_length: 64
+encryption_prefix: "encrypted:"
 
 # Redis configuration
 redis_server: redis://localhost:6379/0

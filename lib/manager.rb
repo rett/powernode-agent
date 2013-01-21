@@ -57,11 +57,20 @@ class Manager
       logger.error "#{@stamp} Exception: #{e.message}"
     end
     if @node
-      @ec2 = Fog::Compute.new(:provider => 'AWS',
-                              :endpoint => @node.node_provider.aws_url,
-                              :aws_access_key_id => @node.node_provider.aws_access_key,
-                              :aws_secret_access_key => @node.node_provider.aws_secret_key)
+      compute = { provider: 'AWS',
+                  endpoint: @node.node_provider.aws_endpoint,
+                  aws_access_key_id: @node.node_provider.aws_access_key_id,
+                  aws_secret_access_key: @node.node_provider.aws_secret_access_key }
+      @cloud = Fog::Compute.new(compute)
       @stamp = "[#{command}:#{@node.id}]"
+      if @node.node_provider.dirty?
+        dirty_provider_attributes = Powernode.config(:encrypted_attributes).map { |a| @node.node_provider.respond_to?(a) ? { a.to_sym => @node.node_provider.send('raw_' + a) } : nil }.compact
+        begin
+          @parent_resource["node/#{@node.id}/provider/#{@node.node_provider.id}.json"].post(node_provider: dirty_provider_attributes)
+        rescue Exception => e
+          logger.error "#{@stamp} Exception: #{e.message}"
+        end
+      end
       send("do_#{command}", params) if respond_to?("do_#{command.to_s}")
     end
   end
@@ -92,9 +101,9 @@ class Manager
     exec = params['exec']
     node_instance_id = params['node_instance_id']
     node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
-    logger.info "#{@stamp} Executing (#{exec}) on #{node_instance.aws_instance}..."
+    logger.info "#{@stamp} Executing (#{exec}) on #{node_instance.name}..."
     begin
-      session = Net::SSH.start(node_instance.ip_private,
+      session = Net::SSH.start(node_instance.private_ip_address,
                                @node.admin_user,
                                key_data: @node.ssh_key,
                                paranoid: false)
@@ -113,7 +122,7 @@ class Manager
   def do_instance_terminate(params)
     node_instance_id = params['node_instance_id']
     node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
-    logger.info "#{@stamp} Terminating instance #{node_instance.aws_instance}..."
+    logger.info "#{@stamp} Terminating instance #{node_instance.name}..."
     destroy_cloud_instance(node_instance)
   end
 
@@ -136,7 +145,7 @@ class Manager
         FileUtils.remove_entry_secure(tmp_dir)
       end
       begin
-        system("sudo rsync -lptgoDH -e \"ssh -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" --files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.ip_private}:/ #{tmp_dir}/")
+        system("sudo rsync -lptgoDH -e \"ssh -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" --files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.private_ip_address}:/ #{tmp_dir}/")
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
       end
@@ -187,8 +196,17 @@ class Manager
       encrypted_ssh_key = @node.ssh_key
     end
     body =<<END
-Here is your SSH key for the node named #{@node.name}.
-#{iv ? "You must decrypt it with the following command:\n\nopenssl #{Powernode.config(:encryption_cipher)} -base64 -d -in #{@node.name + '.pem'} -iv #{iv.unpack('H*')[0]} -K [insert your key here]\n" : ""}
+Attached is the encrypted SSH key for node #{@node.name}.
+
+You must decrypt the ssh key with the following command:
+$ openssl #{Powernode.config(:encryption_cipher)} -base64 -d -in #{@node.name + '.pem.sha'} -out #{@node.name + '.pem'} -iv #{iv.unpack('H*')[0]} -K [insert your key here]
+
+And change the file permissions:
+$ chmod 600 #{@node.name + '.pem'}
+
+In order to SSH in to an instance, do so by specifying the private key, for example:
+$ ssh -i #{@node.name + '.pem'} #{@node.admin_user}@#{@node.primary_instance.public_ip_address}
+
 Thanks,
 Node Alchemy
 END
@@ -197,7 +215,7 @@ END
         to: recipient,
         subject: "SSH key for #{@node.name}",
         body: body,
-        attachments: { "#{@node.name}.pem" => encrypted_ssh_key },
+        attachments: { "#{@node.name}.pem.sha" => encrypted_ssh_key },
         headers: { "Content-Type" => "multipart/mixed", "Content-Transfer-Encoding" => "base64", "Content-Disposition" => "attachment" },
       )
     rescue Exception => e
@@ -208,10 +226,10 @@ END
   def do_update_cloud_instances(params)
     if @node.enabled
       @node.cloud_instances.each do |node_instance|
-        logger.info "#{@stamp} Triggering update on instance: #{node_instance.aws_instance}.\n\n"
-        if node_instance.ip_private && @node.ssh_key
+        logger.info "#{@stamp} Triggering update on instance: #{node_instance.name}."
+        if node_instance.private_ip_address && @node.ssh_key
           begin
-            session = Net::SSH.start(node_instance.ip_private,
+            session = Net::SSH.start(node_instance.private_ip_address,
                                      @node.node_template.admin_user,
                                      key_data: @node.ssh_key,
                                      paranoid: false)
@@ -241,9 +259,9 @@ END
   end
 
   def destroy_cloud_instance(node_instance)
-    logger.info "#{@stamp} Destroying instance: #{node_instance.aws_instance}"
+    logger.info "#{@stamp} Destroying instance: #{node_instance.name}"
     begin
-      if @ec2.servers.destroy(node_instance.aws_instance)
+      if @cloud.servers.destroy(node_instance.name)
         @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
         @node.node_instances.delete_if { |i| i.id == node_instance.id }
       end
@@ -258,7 +276,7 @@ END
     keys = []
     begin
       logger.info "#{@stamp} Attempting to retrieve keypairs..."
-      keys = @ec2.key_pairs.all
+      keys = @cloud.key_pairs.all
       key = keys.select { |k| k.name == keypair_name }.first
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
@@ -268,13 +286,13 @@ END
     else
       begin
         logger.info "#{@stamp} Deleting key: #{keypair_name}"
-        @ec2.delete_key_pair(keypair_name)
+        @cloud.delete_key_pair(keypair_name)
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
       end
       begin
         logger.info "#{@stamp} Creating key: #{keypair_name}"
-        key = @ec2.key_pairs.create(name: keypair_name)
+        key = @cloud.key_pairs.create(name: keypair_name)
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
       end
@@ -293,31 +311,31 @@ END
       end
     end
     user_data = <<END
-ID=\"#{@node.id}\"
-KEY=\"#{Powernode.config(:key)}\"
-PARENT=\"#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}\"
-PROVISIONAL=\"false\"
+ID=#{@node.id}
+KEY=#{Powernode.config(:key)}
+PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}
+PROVISIONAL=false
 END
     count.times do
       instance_options = {}
       instance_options[:availability_zone] = @node.node_provider.aws_availability_zone if @node.node_provider.aws_availability_zone
-      instance_options[:image_id] = @node.node_provider.aws_image if !@node.node_provider.aws_image.empty?
-      instance_options[:ramdisk_id] = @node.node_provider.aws_ramdisk if !@node.node_provider.aws_ramdisk.empty?
+      instance_options[:image_id] = @node.node_provider.image_id if !@node.node_provider.image_id.empty?
+      instance_options[:ramdisk_id] = @node.node_provider.ramdisk_id if !@node.node_provider.ramdisk_id.empty?
       instance_options[:flavor_id] = @node.node_instance_type.name
+      instance_options[:region] = @node.node_provider.region
       instance_options[:key_name] = key.name
       instance_options[:user_data] = user_data
       begin
-        if (aws_instance = @ec2.servers.create(instance_options))
-          logger.info "#{@stamp} Created new instance: #{aws_instance.id}"
-          node_instance = NodeInstance.new({ name: aws_instance.id,
-                                             aws_instance: aws_instance.id,
+        if (cloud_instance = @cloud.servers.create(instance_options))
+          logger.info "#{@stamp} Created new instance: #{cloud_instance.id}"
+          node_instance = NodeInstance.new({ name: cloud_instance.id,
                                              cloud: true,
-                                             ip_private: aws_instance.private_ip_address,
-                                             ip_public: aws_instance.public_ip_address,
-                                             state: aws_instance.state,
-                                             started_at: aws_instance.created_at })
+                                             private_ip_address: cloud_instance.private_ip_address,
+                                             public_ip_address: cloud_instance.public_ip_address,
+                                             state: cloud_instance.state,
+                                             started_at: cloud_instance.created_at })
           unless @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
-            @ec2.servers.destroy(aws_instance.id)
+            @cloud.servers.destroy(cloud_instance.id)
           end
         end
       rescue Exception => e
@@ -334,29 +352,29 @@ END
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
     end
-    if @ec2
+    if @cloud
       if @node.enabled
         if @node.cloud_instances.count > 0
           @node.cloud_instances.each do |node_instance|
             begin
-              aws_instance = @ec2.servers.get(node_instance.aws_instance)
+              cloud_instance = @cloud.servers.get(node_instance.name)
               aws_available = true
             rescue Exception => e
               logger.error "#{@stamp} Exception: #{e.message}"
             end
             if aws_available
-              if aws_instance && aws_instance.flavor_id == @node.node_instance_type.name
-                logger.info "#{@stamp} Updating instance: #{aws_instance.id}"
-                node_instance.ip_private = aws_instance.private_ip_address
-                node_instance.ip_public = aws_instance.public_ip_address
-                node_instance.state = aws_instance.state
+              if cloud_instance && cloud_instance.flavor_id == @node.node_instance_type.name
+                logger.info "#{@stamp} Updating instance: #{cloud_instance.id}"
+                node_instance.private_ip_address = cloud_instance.private_ip_address
+                node_instance.public_ip_address = cloud_instance.public_ip_address
+                node_instance.state = cloud_instance.state
                 @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].post(node_instance: node_instance.to_json)
-              elsif aws_instance && aws_instance.flavor_id != @node.node_instance_type.name
-                logger.info "#{@stamp} Node instance type incorrect for instance: #{aws_instance.id}"
+              elsif cloud_instance && cloud_instance.flavor_id != @node.node_instance_type.name
+                logger.info "#{@stamp} Node instance type incorrect for instance: #{cloud_instance.id}"
                 destroy_cloud_instance(node_instance)
                 launch_instances(1)
               else
-                logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.aws_instance}"
+                logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.name}"
                 @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
                 @node.node_instances.delete(node_instance)
               end
