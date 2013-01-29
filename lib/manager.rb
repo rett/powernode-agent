@@ -63,14 +63,23 @@ class Manager
                   aws_secret_access_key: @node.node_provider.aws_secret_access_key }
       @cloud = Fog::Compute.new(compute)
       @stamp = "[#{command}:#{@node.id}]"
-      if @node.node_provider.dirty?
-        dirty_provider_attributes = Powernode.config(:encrypted_attributes).map { |a| @node.node_provider.respond_to?(a) ? { a.to_sym => @node.node_provider.send('raw_' + a) } : nil }.compact
+      if @node.dirty?
+        dirty_attributes = Powernode.config(:encrypted_attributes).map { |a| @node.respond_to?(a) ? { a.to_sym => @node.send('raw_' + a) } : nil }.compact
         begin
-          @parent_resource["node/#{@node.id}/provider/#{@node.node_provider.id}.json"].post(node_provider: dirty_provider_attributes)
+          @parent_resource["node/#{@node.id}.json"].post(node: dirty_attributes)
         rescue Exception => e
           logger.error "#{@stamp} Exception: #{e.message}"
         end
       end
+      if @node.node_provider.dirty?
+        dirty_attributes = Powernode.config(:encrypted_attributes).map { |a| @node.node_provider.respond_to?(a) ? { a.to_sym => @node.node_provider.send('raw_' + a) } : nil }.compact
+        begin
+          @parent_resource["node/#{@node.id}/provider/#{@node.node_provider.id}.json"].post(node_provider: dirty_attributes)
+        rescue Exception => e
+          logger.error "#{@stamp} Exception: #{e.message}"
+        end
+      end
+      @node = Node.new(JSON.parse(@parent_resource["node/#{node_id}.json"].get)) if dirty_attributes
       send("do_#{command}", params) if respond_to?("do_#{command.to_s}")
     end
   end
@@ -126,6 +135,101 @@ class Manager
     destroy_cloud_instance(node_instance)
   end
 
+  def do_create_iso(params)
+    logger.info "#{@stamp} Creating ISO for node: #{@node.id}"
+    node_instance = @node.node_instances.select { |i| i.id == params['node_instance_id'] }.first if params['node_instance_id']
+    kernel_file = File.join(Powernode.config(:kernel_path), "#{@node.id}.kernel")
+    ramdisk_file = File.join(Powernode.config(:kernel_path), "#{@node.id}.ramdisk")
+    unless File.exists?(kernel_file) && Digest::SHA2.new(Powernode.config(:checksum_bitlength)).hexdigest(File.binread(kernel_file)) == @node.node_platform.kernel_checksum
+      logger.info "#{@stamp} Downloading kernel for platform #{@node.node_platform.id}."
+      begin
+        FileUtils.mkdir_p(Powernode.config(:kernel_path))
+      rescue Exception => e
+        logger.error "#{@stamp} Exception: #{e.message}"
+      end
+      begin
+        File.open(kernel_file, 'w') { |f| f.write(@parent_resource["node/#{@node.id}/platform_kernel.html"].get) }
+      rescue Exception => e
+        logger.error "#{@stamp} Exception: #{e.message}"
+      end
+    end
+    unless File.exists?(ramdisk_file) && Digest::SHA2.new(Powernode.config(:checksum_bitlength)).hexdigest(File.binread(ramdisk_file)) == @node.node_platform.ramdisk_checksum
+      logger.info "#{@stamp} Downloading ramdisk for platform #{@node.node_platform.id}."
+      begin
+        FileUtils.mkdir_p(Powernode.config(:kernel_path))
+      rescue Exception => e
+        logger.error "#{@stamp} Exception: #{e.message}"
+      end
+      begin
+        File.open(ramdisk_file, 'w') { |f| f.write(@parent_resource["node/#{@node.id}/platform_ramdisk.html"].get) }
+      rescue Exception => e
+        logger.error "#{@stamp} Exception: #{e.message}"
+      end
+    end
+
+    tmp_dir = Dir.mktmpdir
+    FileUtils.mkdir_p(File.join(tmp_dir, 'modules'))
+
+    begin
+      node_modules = JSON.parse(@parent_resource["node/#{@node.id}/modules.json"].get).map { |m| NodeModule.new(m) }
+    rescue Exception => e
+      logger.error "#{@stamp} Exception: #{e.message}"
+    end
+
+    if node_modules
+      node_modules.each do |node_module|
+        module_file_name = "#{node_module.id}-#{node_module.data_file_version}#{Powernode.config(:module_extension)}"
+        module_file = File.join(tmp_dir, 'modules', module_file_name)
+        File.open(module_file, 'w') { |f| f << @parent_resource["node/#{@node.id}/module/#{node_module.id}.html"].get }
+        module_info_file_name = "#{node_module.id}-#{node_module.data_file_version}#{Powernode.config(:module_info_extension)}"
+        module_info = File.join(tmp_dir, 'modules', module_info_file_name)
+        File.open(module_info, 'w') { |f| f << @parent_resource["node/#{@node.id}/module/#{node_module.id}.text"].get }
+      end
+    end
+
+    node_cfg_file = File.join(tmp_dir, 'node.cfg')
+    begin
+      File.open(node_cfg_file, 'w') do |f|
+        f.puts(node_config)
+      end
+    rescue Exception => e
+      logger.error "#{@stamp} Exception: #{e.message}"
+    end
+
+    volume_cfg_file = File.join(tmp_dir, 'volume.cfg')
+    begin
+      File.open(volume_cfg_file, 'w') do |f|
+        f.puts("modules=modules")
+      end
+    rescue Exception => e
+      logger.error "#{@stamp} Exception: #{e.message}"
+    end
+
+    FileUtils.mkdir_p(File.join(tmp_dir, 'syslinux'))
+    FileUtils.cp(File.join(Powernode.config(:syslinux_path), 'isolinux.bin'), File.join(tmp_dir, 'syslinux'))
+    FileUtils.cp(File.join(Powernode.config(:syslinux_path), 'isolinux.cfg'), File.join(tmp_dir, 'syslinux'))
+    FileUtils.cp(kernel_file, File.join(tmp_dir, 'syslinux', 'kernel'))
+    FileUtils.cp(ramdisk_file, File.join(tmp_dir, 'syslinux', 'ramdisk'))
+
+    node_iso_file = Tempfile.new("#{@node.id}.iso-")
+    FileUtils.chmod(0644, node_iso_file)
+    system("mkisofs -o #{node_iso_file.path} -b syslinux/isolinux.bin -c boot.cat -R -J -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}")
+
+    if node_iso_file.size > 0
+      begin
+        @node = Node.new(JSON.parse(@parent_resource["node/#{@node.id}/iso.json"].post(
+          node_instance_id: node_instance.id,
+          iso: File.open(node_iso_file),
+          multipart: true,
+          content_type: 'application/octet-stream',
+          accept: :json)))
+      rescue Exception => e
+        logger.error "#{@stamp} Exception: #{e.message}"
+      end
+    end
+    FileUtils.remove_entry_secure(tmp_dir)
+  end
+
   def do_node_module_commit(params)
     node_module_id = params['node_module_id']
     node_module = NodeModule.new(JSON.parse(@parent_resource["node/#{@node.id}/module/#{node_module_id}.json"].get))
@@ -169,7 +273,7 @@ class Manager
           end
           FileUtils.remove_entry_secure(tmp_dir, force: true)
           FileUtils.remove_entry_secure(tmp_module, force: true)
-          logger.info "#{@stamp} Commit complete for node module #{new_node_module.data_file_name}."
+          logger.info "#{@stamp} Commit complete for node module #{module_file_name}."
         else
           logger.info "#{@stamp} Commit aborted."
         end
@@ -229,22 +333,12 @@ END
         logger.info "#{@stamp} Triggering update on instance: #{node_instance.name}."
         if node_instance.private_ip_address && @node.ssh_key
           begin
-            session = Net::SSH.start(node_instance.private_ip_address,
-                                     @node.node_template.admin_user,
-                                     key_data: @node.ssh_key,
-                                     paranoid: false)
+            session.exec!("sudo /usr/sbin/ipn -u")
           rescue Exception => e
             logger.error "#{@stamp} Exception: #{e.message}"
           end
-          if session
-            begin
-              session.exec!("sudo /usr/sbin/ipn -u")
-            rescue Exception => e
-              logger.error "#{@stamp} Exception: #{e.message}"
-            end
-          end
-          @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
         end
+        @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
       end
     end
   end
@@ -298,9 +392,8 @@ END
       end
       logger.info "#{@stamp} Using key: #{keypair_name}"
       if key && key.private_key
-        @node.ssh_key = key.private_key
-        @node.ssh_key_fingerprint = key.fingerprint
-        if @parent_resource["node/#{@node.id}"].post(ssh_key: @node.raw_ssh_key, ssh_key_fingerprint: @node.ssh_key_fingerprint)
+        node_attributes = { ssh_key: Powernode.encrypt(key.private_key), ssh_key_fingerprint: key.fingerprint }
+        if @parent_resource["node/#{@node.id}"].post(node: node_attributes)
           if (ssh_key_path = Powernode.config(:ssh_key_path))
             FileUtils.mkdir_p(ssh_key_path)
             FileUtils.touch(@node.ssh_key_file)
@@ -310,12 +403,6 @@ END
         end
       end
     end
-    user_data = <<END
-ID=#{@node.id}
-KEY=#{Powernode.config(:key)}
-PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}
-PROVISIONAL=false
-END
     count.times do
       instance_options = {}
       instance_options[:availability_zone] = @node.node_provider.aws_availability_zone if @node.node_provider.aws_availability_zone
@@ -324,7 +411,7 @@ END
       instance_options[:flavor_id] = @node.node_instance_type.name
       instance_options[:region] = @node.node_provider.region
       instance_options[:key_name] = key.name
-      instance_options[:user_data] = user_data
+      instance_options[:user_data] = node_config
       begin
         if (cloud_instance = @cloud.servers.create(instance_options))
           logger.info "#{@stamp} Created new instance: #{cloud_instance.id}"
@@ -401,5 +488,30 @@ END
       logger.info "#{@stamp} Checking physical instance #{node_instance.id}"
     end
     logger.info "#{@stamp} Physical instance check complete."
+  end
+
+  private
+
+  def node_config
+    <<END
+ID=#{@node.id}
+KEY=#{Powernode.config(:key)}
+PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}
+API_URL="#{Powernode.config(:api_url)}"
+ADMIN_USER=#{@node.admin_user}
+EPHEMERAL=#{@node.ephemeral}
+CHKSUM=#{Powernode.config(:checksum_util)}
+MAXLOOP=#{Powernode.config(:loop_devices)}
+MEMORY=#{Powernode.config(:memory_dir)}
+BRANCHES=#{Powernode.config(:branches_dir)}
+CHANGES=#{Powernode.config(:changes_dir)}
+RAM=#{Powernode.config(:ram_dir)}
+VOLUMES=#{Powernode.config(:volumes_dir)}
+MODULES=#{Powernode.config(:modules_dir)}
+MODULE_EXT=#{Powernode.config(:module_extension)}
+MODULE_INFO_EXT=#{Powernode.config(:module_info_extension)}
+MODULE_UPDATE_EXT=#{Powernode.config(:module_update_extension)}
+TMPFS_STORE=#{@node.tmpfs_store}
+END
   end
 end
