@@ -29,7 +29,7 @@ ssh_key_path: /opt/powernode/manager/keys
 ssh_port: 22
 
 # Encryption options
-encrypted_attributes: [aws_secret_access_key, ssh_key]
+encrypted_attributes: [aws_secret_access_key, manager_key, ssh_key]
 encryption_cipher: aes-256-cbc
 encryption_key: insert_random_key_here
 encryption_key_length: 64
