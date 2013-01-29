@@ -1,1 +1,4 @@
-manager: 10
+:verbose: false
+:concurrency:  5
+:queues:
+  - [manager, 10]

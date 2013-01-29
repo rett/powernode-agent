@@ -6,7 +6,7 @@ module Powernode
       @dirty = false
       raise "expected Hash param" unless item.kind_of? Hash
       item.each do |key, value|
-        #value = '' if value.nil?
+        value = String.new if value.nil?
         if Powernode.config('encrypted_attributes').include?(key) && value.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
           instance_variable_set(sanitize_key(key), value.sub(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/, ''))
           define_singleton_method(key.to_s) { Powernode.decrypt(instance_variable_get(sanitize_key(key))) }
