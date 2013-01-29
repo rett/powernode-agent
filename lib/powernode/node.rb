@@ -1,5 +1,6 @@
 class Node
   include Powernode::ModelExtensions
+
   def build_objects
     self.node_instance_type  = NodeInstanceType.new(node_instance_type) if self.respond_to?(:node_instance_type)
     self.node_instances = node_instances.collect { |i| NodeInstance.new(i) } if self.respond_to?(:node_instances)

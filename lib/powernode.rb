@@ -6,6 +6,7 @@ module Powernode
       @dirty = false
       raise "expected Hash param" unless item.kind_of? Hash
       item.each do |key, value|
+        #value = '' if value.nil?
         if Powernode.config('encrypted_attributes').include?(key) && value.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
           instance_variable_set(sanitize_key(key), value.sub(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/, ''))
           define_singleton_method(key.to_s) { Powernode.decrypt(instance_variable_get(sanitize_key(key))) }
@@ -15,8 +16,7 @@ module Powernode
           instance_variable_set(sanitize_key(key), Powernode.encrypt(dirty_value))
           define_singleton_method(key.to_s) { Powernode.decrypt(instance_variable_get(sanitize_key(key))) }
           define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), Powernode.encrypt(val)) }
-          #define_singleton_method("dirty?") { true }
-          @dirty = true
+          define_singleton_method("dirty?") { true }
         else
           instance_variable_set(sanitize_key(key), value)
           define_singleton_method(key.to_s) { instance_variable_get(sanitize_key(key)) }
@@ -24,12 +24,8 @@ module Powernode
         end
         define_singleton_method('raw_' + key.to_s) { instance_variable_get(sanitize_key(key)) }
       end
-      #define_singleton_method("dirty?") { false } unless self.respond_to?(:dirty?)
+      define_singleton_method("dirty?") { false } unless self.respond_to?(:dirty?)
       self.build_objects if self.respond_to?(:build_objects)
-    end
-
-    def dirty?
-      @dirty
     end
 
     protected
@@ -45,7 +41,7 @@ module Powernode
   end
 
   def self.decrypt(data, encryption_cipher = Powernode.config('encryption_cipher'), encryption_key = Powernode.config('encryption_key'))
-    if data && encryption_cipher && encryption_key
+    if data.size > 0 && encryption_cipher && encryption_key
       cipher = OpenSSL::Cipher.new(encryption_cipher)
       cipher.decrypt
       cipher.key = encryption_key
@@ -60,7 +56,7 @@ module Powernode
   end
 
   def self.encrypt(data, encryption_cipher = Powernode.config('encryption_cipher'), encryption_key = Powernode.config('encryption_key'))
-    if data && encryption_cipher && encryption_key
+    if data.size > 0 && encryption_cipher && encryption_key && !data.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
       cipher = OpenSSL::Cipher.new(encryption_cipher)
       cipher.encrypt
       cipher.key = encryption_key
