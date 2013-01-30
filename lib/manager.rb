@@ -494,6 +494,7 @@ END
 
   def node_config
     <<END
+export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ID=#{@node.id}
 KEY=#{Powernode.config(:key)}
 PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}
