@@ -137,7 +137,7 @@ class Manager
 
   def do_create_iso(params)
     logger.info "#{@stamp} Creating ISO for node: #{@node.id}"
-    node_instance = @node.node_instances.select { |i| i.id == params['node_instance_id'] }.first if params['node_instance_id']
+    @node_instance = @node.node_instances.select { |i| i.id == params['node_instance_id'] }.first if params['node_instance_id']
     kernel_file = File.join(Powernode.config(:kernel_path), "#{@node.id}.kernel")
     ramdisk_file = File.join(Powernode.config(:kernel_path), "#{@node.id}.ramdisk")
     unless File.exists?(kernel_file) && Digest::SHA2.new(Powernode.config(:checksum_bitlength)).hexdigest(File.binread(kernel_file)) == @node.node_platform.kernel_checksum
@@ -218,7 +218,7 @@ class Manager
     if node_iso_file.size > 0
       begin
         @node = Node.new(JSON.parse(@parent_resource["node/#{@node.id}/iso.json"].post(
-          node_instance_id: node_instance.id,
+          node_instance_id: @node_instance.id,
           iso: File.open(node_iso_file),
           multipart: true,
           content_type: 'application/octet-stream',
@@ -495,8 +495,8 @@ END
   def node_config
     <<END
 export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-ID=#{@node.id}
-KEY=#{Powernode.config(:key)}
+ID=#{@node_instance ? @node_instance.id : @node.id}
+KEY=#{@node.manager_key}
 PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}
 API_URL="#{Powernode.config(:api_url)}"
 ADMIN_USER=#{@node.admin_user}

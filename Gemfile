@@ -1,4 +1,4 @@
-source 'http://gemcutter.org'
+source 'https://rubygems.org'
 gem 'activesupport', '~> 3.2'
 gem 'daemons'
 gem 'fog'
