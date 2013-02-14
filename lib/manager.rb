@@ -64,7 +64,7 @@ class Manager
       @cloud = Fog::Compute.new(compute)
       @stamp = "[#{command}:#{@node.id}]"
       if @node.dirty?
-        dirty_attributes = Powernode.config(:encrypted_attributes).map { |a| @node.respond_to?(a) ? { a.to_sym => @node.send('raw_' + a) } : nil }.compact
+        dirty_attributes = Powernode.config(:encrypted_attributes).map { |a| @node.respond_to?("#{a}_dirty") ? { a.to_sym => @node.send('raw_' + a) } : nil }.compact
         begin
           @parent_resource["node/#{@node.id}.json"].post(node: dirty_attributes)
         rescue Exception => e
@@ -273,7 +273,7 @@ class Manager
           end
           FileUtils.remove_entry_secure(tmp_dir, force: true)
           FileUtils.remove_entry_secure(tmp_module, force: true)
-          logger.info "#{@stamp} Commit complete for node module #{module_file_name}."
+          logger.info "#{@stamp} Commit complete for node module #{node_module.id}."
         else
           logger.info "#{@stamp} Commit aborted."
         end
@@ -398,7 +398,7 @@ END
             FileUtils.mkdir_p(ssh_key_path)
             FileUtils.touch(@node.ssh_key_file)
             FileUtils.chmod(0600, @node.ssh_key_file)
-            File.open(@node.ssh_key_file, 'w') { |f| f.write(@node.ssh_key) }
+            File.open(@node.ssh_key_file, 'w') { |f| f.write(key.private_key) }
           end
         end
       end
@@ -459,7 +459,6 @@ END
               elsif cloud_instance && cloud_instance.flavor_id != @node.node_instance_type.name
                 logger.info "#{@stamp} Node instance type incorrect for instance: #{cloud_instance.id}"
                 destroy_cloud_instance(node_instance)
-                launch_instances(1)
               else
                 logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.name}"
                 @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
@@ -501,6 +500,7 @@ PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Pow
 API_URL="#{Powernode.config(:api_url)}"
 ADMIN_USER=#{@node.admin_user}
 EPHEMERAL=#{@node.ephemeral}
+PROVISIONAL=#{@node_instance && !@node_instance.cloud ? 'true' : 'false'}
 CHKSUM=#{Powernode.config(:checksum_util)}
 MAXLOOP=#{Powernode.config(:loop_devices)}
 MEMORY=#{Powernode.config(:memory_dir)}

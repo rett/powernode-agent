@@ -12,10 +12,10 @@ module Powernode
           define_singleton_method(key.to_s) { Powernode.decrypt(instance_variable_get(sanitize_key(key))) }
           define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), Powernode.encrypt(val)) }
         elsif Powernode.config('encrypted_attributes').include?(key)
-          dirty_value = value.sub(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/, '')
-          instance_variable_set(sanitize_key(key), Powernode.encrypt(dirty_value))
+          instance_variable_set(sanitize_key(key), Powernode.encrypt(value))
           define_singleton_method(key.to_s) { Powernode.decrypt(instance_variable_get(sanitize_key(key))) }
           define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), Powernode.encrypt(val)) }
+          define_singleton_method("#{key.to_s}_dirty") { true }
           define_singleton_method("dirty?") { true }
         else
           instance_variable_set(sanitize_key(key), value)
@@ -24,7 +24,7 @@ module Powernode
         end
         define_singleton_method('raw_' + key.to_s) { instance_variable_get(sanitize_key(key)) }
       end
-      define_singleton_method("dirty?") { false } unless self.respond_to?(:dirty?)
+      define_singleton_method('dirty?') { false } unless self.respond_to?(:dirty?)
       self.build_objects if self.respond_to?(:build_objects)
     end
 
@@ -70,7 +70,6 @@ module Powernode
     end
     encrypted_data
   end
-
 
   def self.logger_init(file_name, log_level)
     @logger = Logger.new(File.join(Powernode.config(:log_path), file_name), Powernode.config(:log_cycle))
