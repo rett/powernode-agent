@@ -171,7 +171,7 @@ class Manager
     FileUtils.mkdir_p(File.join(tmp_dir, 'modules'))
 
     begin
-      node_modules = JSON.parse(@parent_resource["node/#{@node.id}/modules.json"].get).map { |m| NodeModule.new(m) }
+      node_modules = JSON.parse(@parent_resource["node/#{@node.id}/modules.json?provisional=true"].get).map { |m| NodeModule.new(m) }
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
     end
@@ -206,11 +206,16 @@ class Manager
     end
 
     FileUtils.mkdir_p(File.join(tmp_dir, 'syslinux'))
-    FileUtils.cp(File.join(Powernode.config(:syslinux_path), 'isolinux.bin'), File.join(tmp_dir, 'syslinux'))
-    FileUtils.cp(File.join(Powernode.config(:syslinux_path), 'isolinux.cfg'), File.join(tmp_dir, 'syslinux'))
     FileUtils.cp(kernel_file, File.join(tmp_dir, 'syslinux', 'kernel'))
     FileUtils.cp(ramdisk_file, File.join(tmp_dir, 'syslinux', 'ramdisk'))
+    FileUtils.cp(File.join(Powernode.config(:syslinux_path), 'isolinux.bin'), File.join(tmp_dir, 'syslinux'))
 
+    isolinux_cfg_file = File.join(tmp_dir, 'syslinux', 'syslinux.cfg')
+    FileUtils.cp(File.join(Powernode.config(:syslinux_path), 'isolinux.cfg'), isolinux_cfg_file)
+    if @node_instance.private_ip_static
+      File.open(isolinux_cfg_file, 'a') { |f| f << "APPEND ip=#{@node_instance.private_ip_address}::#{@node_instance.private_ip_gateway}:#{@node_instance.private_ip_netmask}:#{@node_instance.name}:#{@node_instance.private_ip_device}:off " +
+                                                   "DNS_PRIMARY=#{@node_instance.private_ip_primary_dns} DNS_SECONDARY=#{@node_instance.private_ip_secondary_dns} DNS_DOMAIN=#{@node_instance.private_ip_domain}"}
+    end
     node_iso_file = Tempfile.new("#{@node.id}.iso-")
     FileUtils.chmod(0644, node_iso_file)
     system("mkisofs -o #{node_iso_file.path} -b syslinux/isolinux.bin -c boot.cat -R -J -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}")
@@ -273,7 +278,7 @@ class Manager
           end
           FileUtils.remove_entry_secure(tmp_dir, force: true)
           FileUtils.remove_entry_secure(tmp_module, force: true)
-          logger.info "#{@stamp} Commit complete for node module #{node_module.id}."
+          logger.info "#{@stamp} Commit complete for node module #{new_node_module.id}."
         else
           logger.info "#{@stamp} Commit aborted."
         end
@@ -497,7 +502,7 @@ export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ID=#{@node_instance ? @node_instance.id : @node.id}
 KEY=#{@node.manager_key}
 PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}
-API_URL="#{Powernode.config(:api_url)}"
+API_URL=#{Powernode.config(:api_url)}
 ADMIN_USER=#{@node.admin_user}
 EPHEMERAL=#{@node.ephemeral}
 PROVISIONAL=#{@node_instance && !@node_instance.cloud ? 'true' : 'false'}
