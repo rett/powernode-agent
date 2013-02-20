@@ -79,7 +79,7 @@ class Manager
           logger.error "#{@stamp} Exception: #{e.message}"
         end
       end
-      @node = Node.new(JSON.parse(@parent_resource["node/#{node_id}.json"].get)) if dirty_attributes
+      @node = Node.new(JSON.parse(@parent_resource["node/#{node_id}.json"].get)) if @node.dirty? || @node.node_provider.dirty?
       send("do_#{command}", params) if respond_to?("do_#{command.to_s}")
     end
   end
@@ -343,7 +343,7 @@ END
             logger.error "#{@stamp} Exception: #{e.message}"
           end
         end
-        @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
+        @parent_resource["node/#{@node.id}/instance.json"].post({ node_instance: node_instance }.to_json, accept: :json, content_type: :json)
       end
     end
   end
@@ -426,7 +426,7 @@ END
                                              public_ip_address: cloud_instance.public_ip_address,
                                              state: cloud_instance.state,
                                              started_at: cloud_instance.created_at })
-          unless @parent_resource["node/#{@node.id}/instance.json"].post(node_instance: node_instance.to_json)
+          unless @parent_resource["node/#{@node.id}/instance.json"].post({ node_instance: node_instance }.to_json, accept: :json, content_type: :json)
             @cloud.servers.destroy(cloud_instance.id)
           end
         end
@@ -439,49 +439,42 @@ END
   def poll_cloud_instances
     logger.info "#{@stamp} Performing cloud instance check."
     logger.info "#{@stamp} Instance variance: #{@node.instance_variance}"
-    begin
-      @parent_resource['node']["#{@node.id}.json"].post(poll: true)
-    rescue Exception => e
-      logger.error "#{@stamp} Exception: #{e.message}"
-    end
-    if @cloud
-      if @node.enabled
-        if @node.cloud_instances.count > 0
-          @node.cloud_instances.each do |node_instance|
-            begin
-              cloud_instance = @cloud.servers.get(node_instance.name)
-              aws_available = true
-            rescue Exception => e
-              logger.error "#{@stamp} Exception: #{e.message}"
-            end
-            if aws_available
-              if cloud_instance && cloud_instance.flavor_id == @node.node_instance_type.name
-                logger.info "#{@stamp} Updating instance: #{cloud_instance.id}"
-                node_instance.private_ip_address = cloud_instance.private_ip_address
-                node_instance.public_ip_address = cloud_instance.public_ip_address
-                node_instance.state = cloud_instance.state
-                @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].post(node_instance: node_instance.to_json)
-              elsif cloud_instance && cloud_instance.flavor_id != @node.node_instance_type.name
-                logger.info "#{@stamp} Node instance type incorrect for instance: #{cloud_instance.id}"
-                destroy_cloud_instance(node_instance)
-              else
-                logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.name}"
-                @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
-                @node.node_instances.delete(node_instance)
-              end
+    if @node.enabled
+      if @node.cloud_instances.count > 0
+        @node.cloud_instances.each do |node_instance|
+          begin
+            cloud_instance = @cloud.servers.get(node_instance.name)
+            aws_available = true
+          rescue Exception => e
+            logger.error "#{@stamp} Exception: #{e.message}"
+          end
+          if aws_available
+            if cloud_instance && cloud_instance.flavor_id == @node.node_instance_type.name
+              logger.info "#{@stamp} Updating instance: #{cloud_instance.id}"
+              node_instance.private_ip_address = cloud_instance.private_ip_address
+              node_instance.public_ip_address = cloud_instance.public_ip_address
+              node_instance.state = cloud_instance.state
+              @parent_resource["node/#{@node.id}/instance.json"].post({ node_instance: node_instance }.to_json, accept: :json, content_type: :json)
+            elsif cloud_instance && cloud_instance.flavor_id != @node.node_instance_type.name
+              logger.info "#{@stamp} Node instance type incorrect for instance: #{cloud_instance.id}"
+              destroy_cloud_instance(node_instance)
+            else
+              logger.info "#{@stamp} Deregistering invalid instance: #{node_instance.name}"
+              @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
+              @node.node_instances.delete(node_instance)
             end
           end
         end
-        if @node.instance_variance > 0
-          logger.info "#{@stamp} Launching #{@node.instance_variance} instances."
-          launch_instances(@node.instance_variance)
-        elsif @node.instance_variance < 0
-          logger.info "#{@stamp} Destroying #{@node.instance_variance} instances."
-          destroy_cloud_instances(@node.cloud_instances, @node.instance_variance.abs)
-        end
-      elsif @node.cloud_instances.count > 0
-        destroy_cloud_instances(@node.cloud_instances, @node.cloud_instances.count)
       end
+      if @node.instance_variance > 0
+        logger.info "#{@stamp} Launching #{@node.instance_variance} instances."
+        launch_instances(@node.instance_variance)
+      elsif @node.instance_variance < 0
+        logger.info "#{@stamp} Destroying #{@node.instance_variance.abs} instances."
+        destroy_cloud_instances(@node.cloud_instances, @node.instance_variance.abs)
+      end
+    elsif @node.cloud_instances.count > 0
+      destroy_cloud_instances(@node.cloud_instances, @node.cloud_instances.count)
     end
     logger.info "#{@stamp} Cloud instance check complete."
   end
