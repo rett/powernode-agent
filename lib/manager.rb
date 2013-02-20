@@ -251,18 +251,30 @@ class Manager
         end
       rescue Exception => e
         logger.error "#{@stamp} Exception: #{e.message}"
-        FileUtils.remove_entry_secure(tmp_dir)
+        FileUtils.remove_entry_secure(tmp_dir, force: true)
       end
-      begin
-        system("sudo rsync -lptgoDH -e \"ssh -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" --files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.private_ip_address}:/ #{tmp_dir}/")
-      rescue Exception => e
-        logger.error "#{@stamp} Exception: #{e.message}"
+      if File.directory?(tmp_dir)
+        begin
+          system("sudo rsync -lptgoDH -e \"ssh -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" " +
+                 "--files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.private_ip_address}:/ #{tmp_dir}/ > /dev/null 2>&1")
+        rescue Exception => e
+          logger.error "#{@stamp} Exception: #{e.message}"
+        end
+        case $?.exitstatus
+          when 23
+            logger.warn "#{@stamp} Not all files transferred."
+          when 255
+            logger.error "#{@stamp} Unable to connect."
+            FileUtils.remove_entry_secure(tmp_dir, force: true)
+          else
+            logger.info "#{@stamp} Rsync successful."
+        end
       end
       if File.directory?(tmp_dir)
         tmp_module = Tempfile.new("module-#{@node.id}-#{node_module.id}")
         tmp_module.close
         begin
-          system("sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config(:module_compression)} -noappend -no-progress > /dev/null")
+          system("sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config(:module_compression)} -noappend -no-progress > /dev/null 2>&1")
         rescue Exception => e
           logger.error "#{@stamp} Exception: #{e.message}"
         end
@@ -280,8 +292,10 @@ class Manager
           FileUtils.remove_entry_secure(tmp_module, force: true)
           logger.info "#{@stamp} Commit complete for node module #{new_node_module.id}."
         else
-          logger.info "#{@stamp} Commit aborted."
+          logger.error "#{@stamp} Commit aborted."
         end
+      else
+        logger.error "#{@stamp} Commit aborted."
       end
     elsif @node.primary_instance.nil?
       logger.info "#{@stamp} Commit aborted: No primary instance found!"
