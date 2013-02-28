@@ -79,6 +79,16 @@ class Manager
           logger.error "#{@stamp} Exception: #{e.message}"
         end
       end
+      @node.node_instances.each do |node_instance|
+        if node_instance.dirty?
+          dirty_attributes = Powernode.config(:encrypted_attributes).map { |a| node_instance.respond_to?(a) ? { a.to_sym => node_instance.send('raw_' + a) } : nil }.compact
+          begin
+            @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].post(node_instance: dirty_attributes)
+          rescue Exception => e
+            logger.error "#{@stamp} Exception: #{e.message}"
+          end
+        end
+      end
       @node = Node.new(JSON.parse(@parent_resource["node/#{node_id}.json"].get)) if @node.dirty? || @node.node_provider.dirty?
       send("do_#{command}", params) if respond_to?("do_#{command.to_s}")
     end
@@ -155,14 +165,14 @@ class Manager
     logger.info "#{@stamp} Creating ISO for node: #{@node.id}"
     @node_instance = @node.node_instances.select { |i| i.id == params['node_instance_id'] }.first if params['node_instance_id']
     begin
-      FileUtils.mkdir_p(Powernode.config(:init_path))
+      FileUtils.mkdir_p(File.join(Powernode.config(:init_path), 'boot'))
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
     end
     kernel_file_name = "#{@node.node_platform.id}.kernel"
-    kernel_file = File.join(Powernode.config(:init_path), kernel_file_name)
+    kernel_file = File.join(Powernode.config(:init_path), 'boot', kernel_file_name)
     ramdisk_file_name = "#{@node.node_platform.id}.ramdisk"
-    ramdisk_file = File.join(Powernode.config(:init_path), ramdisk_file_name)
+    ramdisk_file = File.join(Powernode.config(:init_path), 'boot', ramdisk_file_name)
     unless File.exists?(kernel_file) && Digest::SHA2.new(Powernode.config(:checksum_bitlength)).hexdigest(File.binread(kernel_file)) == @node.node_platform.kernel_checksum
       logger.info "#{@stamp} Downloading kernel for platform #{@node.node_platform.id}."
       begin
@@ -212,16 +222,16 @@ class Manager
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
     end
-    FileUtils.mkdir_p(File.join(tmp_dir, 'syslinux'))
-    FileUtils.cp(kernel_file, File.join(tmp_dir))
-    FileUtils.cp(ramdisk_file, File.join(tmp_dir))
-    FileUtils.cp(File.join(Powernode.config(:init_path), 'isolinux.bin'), File.join(tmp_dir, 'syslinux'))
+    FileUtils.mkdir_p(File.join(tmp_dir, 'boot'))
+    FileUtils.cp(kernel_file, File.join(tmp_dir, 'boot'))
+    FileUtils.cp(ramdisk_file, File.join(tmp_dir, 'boot'))
+    FileUtils.cp(File.join(Powernode.config(:init_path), 'isolinux.bin'), tmp_dir)
     isolinux_cfg_file = File.join(tmp_dir, 'syslinux.cfg')
     FileUtils.cp(File.join(Powernode.config(:init_path), 'syslinux.cfg'), isolinux_cfg_file)
     begin
       File.open(isolinux_cfg_file, 'a') do |f|
-        f << "KERNEL #{@node.node_platform.id}.kernel\n"
-        f << "RAMDISK #{@node.node_platform.id}.ramdisk\n"
+        f << "KERNEL /boot/#{@node.node_platform.id}.kernel\n"
+        f << "RAMDISK /boot/#{@node.node_platform.id}.ramdisk\n"
       end
     rescue Exception => e
       logger.error "#{@stamp} Exception: #{e.message}"
@@ -232,7 +242,7 @@ class Manager
     end
     node_iso_file = Tempfile.new("#{@node.id}.iso-")
     FileUtils.chmod(0644, node_iso_file)
-    system("mkisofs -o #{node_iso_file.path} -b syslinux/isolinux.bin -c boot.cat -R -J -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}")
+    system("mkisofs -o #{node_iso_file.path} -b isolinux.bin -c boot.cat -R -J -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}")
     if node_iso_file.size > 0
       begin
         @node = Node.new(JSON.parse(@parent_resource["node/#{@node.id}/iso.json"].post(
@@ -467,7 +477,7 @@ END
     <<END
 export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ID=#{@node_instance ? @node_instance.id : @node.id}
-KEY=#{@node_instance.manager_key ? @node_instance.manager_key : @node.manager_key}
+KEY=#{@node_instance.manager_key.blank? ? @node.manager_key : @node_instance.manager_key }
 PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}
 API_URL=#{Powernode.config(:api_url)}
 ADMIN_USER=#{@node.admin_user}
@@ -542,15 +552,16 @@ END
 
   def sync_netboot(node_instance)
     FileUtils.mkdir_p(File.join(Powernode.config(:init_path), 'pxelinux.cfg'))
+    FileUtils.mkdir_p(File.join(Powernode.config(:init_path), 'boot'))
     unless node_instance.private_mac_address.empty?
       pxelinux_cfg_file = File.join(Powernode.config(:init_path), 'pxelinux.cfg', node_instance.private_mac_address)
       netboot_configured_at = Time.parse(node_instance.private_netboot_configured_at) unless node_instance.private_netboot_configured_at.blank?
       if !File.exist?(pxelinux_cfg_file) || netboot_configured_at.nil? || netboot_configured_at != File.mtime(pxelinux_cfg_file)
-        FileUtils.cp(File.join(Powernode.config(:init_path), 'pxelinux.cfg', 'default'), pxelinux_cfg_file)
+        FileUtils.cp(File.join(Powernode.config(:init_path), 'syslinux.cfg'), pxelinux_cfg_file)
         kernel_file_name = "#{@node.node_platform.id}.kernel"
-        kernel_file = File.join(Powernode.config(:init_path), kernel_file_name)
+        kernel_file = File.join(Powernode.config(:init_path), 'boot', kernel_file_name)
         ramdisk_file_name = "#{@node.node_platform.id}.ramdisk"
-        ramdisk_file = File.join(Powernode.config(:init_path), ramdisk_file_name)
+        ramdisk_file = File.join(Powernode.config(:init_path), 'boot', ramdisk_file_name)
         unless File.exists?(kernel_file) && Digest::SHA2.new(Powernode.config(:checksum_bitlength)).hexdigest(File.binread(kernel_file)) == @node.node_platform.kernel_checksum
           logger.info "#{@stamp} Downloading kernel for platform #{@node.node_platform.id}."
           begin
@@ -569,8 +580,8 @@ END
         end
         begin
           File.open(pxelinux_cfg_file, 'a') do |f|
-            f << "KERNEL #{kernel_file_name}\n"
-            f << "RAMDISK #{ramdisk_file_name}\n"
+            f << "KERNEL /boot/#{kernel_file_name}\n"
+            f << "RAMDISK /boot/#{ramdisk_file_name}\n"
           end
         rescue Exception => e
           logger.error "#{@stamp} Exception: #{e.message}"
@@ -590,11 +601,8 @@ END
           rescue Exception => e
             logger.error "#{@stamp} Exception: #{e.message}"
           end
-          @parent_resource["node/#{@node.id}/instance.json"].post({
-            node_instance: {
-              id: node_instance.id,
-              private_netboot_configured_at: netboot_configured_at
-            }
+          @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].post({
+            node_instance: { private_netboot_configured_at: netboot_configured_at }
           }.to_json, accept: :json, content_type: :json)
         elsif !node_instance.private_netboot_enabled
           FileUtils.rm_f(netboot_config_file)
