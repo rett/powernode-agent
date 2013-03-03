@@ -230,6 +230,7 @@ class Manager
     FileUtils.cp(File.join(Powernode.config(:init_path), 'syslinux.cfg'), isolinux_cfg_file)
     begin
       File.open(isolinux_cfg_file, 'a') do |f|
+        f << "LABEL linux"
         f << "KERNEL /boot/#{@node.node_platform.id}.kernel\n"
         f << "RAMDISK /boot/#{@node.node_platform.id}.ramdisk\n"
       end
@@ -545,19 +546,29 @@ END
     logger.info "#{@stamp} Performing physical instance check."
     @node.physical_instances.each do |node_instance|
       logger.info "#{@stamp} Checking physical instance #{node_instance.id}"
-      sync_netboot(node_instance)
+      netboot_sync(node_instance)
     end
+    netboot_clean
     logger.info "#{@stamp} Physical instance check complete."
   end
 
-  def sync_netboot(node_instance)
+  def netboot_clean
+    Dir.glob(File.join(Powernode.config(:init_path), 'pxelinux.cfg', '??-??-??-??-??-??')) do |f|
+      FileUtils.rm(f) if File.mtime(f) < Time.now - Powernode.config(:init_expire)
+    end
+  end
+
+  def netboot_sync(node_instance)
     FileUtils.mkdir_p(File.join(Powernode.config(:init_path), 'pxelinux.cfg'))
     FileUtils.mkdir_p(File.join(Powernode.config(:init_path), 'boot'))
-    unless node_instance.private_mac_address.empty?
-      pxelinux_cfg_file = File.join(Powernode.config(:init_path), 'pxelinux.cfg', node_instance.private_mac_address)
-      netboot_configured_at = Time.parse(node_instance.private_netboot_configured_at) unless node_instance.private_netboot_configured_at.blank?
-      if !File.exist?(pxelinux_cfg_file) || netboot_configured_at.nil? || netboot_configured_at != File.mtime(pxelinux_cfg_file)
-        FileUtils.cp(File.join(Powernode.config(:init_path), 'syslinux.cfg'), pxelinux_cfg_file)
+    if node_instance.private_netboot_enabled && !node_instance.private_mac_address.empty?
+      netboot_cfg_file = File.join(Powernode.config(:init_path), 'pxelinux.cfg', node_instance.private_mac_address)
+      if File.exist?(netboot_cfg_file)
+        private_netboot_configured_at = open(netboot_cfg_file, 'r') { |f| f.each_line.find { |line| line.include?('Configured:') }.try(:match, /(\d\d\d\d)-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)-(\d\d):(\d\d)/) }
+      end
+      if File.exist?(netboot_cfg_file) && (File.mtime(netboot_cfg_file) < Time.now - Powernode.config(:init_expire) || node_instance.private_netboot_configured_at == private_netboot_configured_at)
+        FileUtils.touch(netboot_cfg_file)
+      else
         kernel_file_name = "#{@node.node_platform.id}.kernel"
         kernel_file = File.join(Powernode.config(:init_path), 'boot', kernel_file_name)
         ramdisk_file_name = "#{@node.node_platform.id}.ramdisk"
@@ -578,36 +589,34 @@ END
             logger.error "#{@stamp} Exception: #{e.message}"
           end
         end
+        netboot_template_file = File.join(Powernode.config(:init_path), 'syslinux.cfg')
+        if File.exist?(netboot_template_file)
+          FileUtils.cp(netboot_template_file, netboot_cfg_file)
+        else
+          File.write(netboot_cfg_file, '')
+        end
         begin
-          File.open(pxelinux_cfg_file, 'a') do |f|
+          File.open(netboot_cfg_file, 'a') do |f|
+            f << "# Configured: #{node_instance.private_netboot_configured_at}\n"
+            f << "LABEL linux\n"
             f << "KERNEL /boot/#{kernel_file_name}\n"
             f << "RAMDISK /boot/#{ramdisk_file_name}\n"
+            f << "APPEND PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)} " +
+                 "ID=#{node_instance ? node_instance.id : @node.id} " +
+                 "KEY=#{node_instance.manager_key.blank? ? @node.manager_key : node_instance.manager_key } "
+            if node_instance.private_ip_static
+              f << "ip=#{node_instance.private_ip_address}::#{node_instance.private_ip_gateway}:#{node_instance.private_ip_netmask}:#{node_instance.name}:#{node_instance.private_ip_device}:off " +
+                   "DNS_PRIMARY=#{node_instance.private_ip_primary_dns} DNS_SECONDARY=#{node_instance.private_ip_secondary_dns} DNS_DOMAIN=#{node_instance.private_ip_domain}\n"
+            else
+              f << "\n"
+            end
           end
         rescue Exception => e
           logger.error "#{@stamp} Exception: #{e.message}"
         end
-        if node_instance.private_netboot_enabled
-          begin
-            File.open(pxelinux_cfg_file, 'a') do |f|
-              f << "APPEND PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)} " +
-                   "ID=#{node_instance ? node_instance.id : @node.id} " +
-                   "KEY=#{node_instance.manager_key.blank? ? @node.manager_key : node_instance.manager_key } "
-              if node_instance.private_ip_static
-                f << "ip=#{node_instance.private_ip_address}::#{node_instance.private_ip_gateway}:#{node_instance.private_ip_netmask}:#{node_instance.name}:#{node_instance.private_ip_device}:off " +
-                     "DNS_PRIMARY=#{node_instance.private_ip_primary_dns} DNS_SECONDARY=#{node_instance.private_ip_secondary_dns} DNS_DOMAIN=#{node_instance.private_ip_domain}\n"
-              end
-            end
-            netboot_configured_at = File.mtime(pxelinux_cfg_file)
-          rescue Exception => e
-            logger.error "#{@stamp} Exception: #{e.message}"
-          end
-          @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].post({
-            node_instance: { private_netboot_configured_at: netboot_configured_at }
-          }.to_json, accept: :json, content_type: :json)
-        elsif !node_instance.private_netboot_enabled
-          FileUtils.rm_f(netboot_config_file)
-        end
       end
+    elsif !node_instance.private_netboot_enabled
+      FileUtils.rm(netboot_config_file) if File.exist?(netboot_config_file)
     end
   end
 end
