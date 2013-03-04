@@ -118,7 +118,7 @@ class Manager
     exec = params['exec']
     node_instance_id = params['node_instance_id']
     node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
-    logger.info "#{@stamp} Executing (#{exec}) on #{node_instance.name}..."
+    logger.info "#{@stamp} Executing (#{exec}) on #{node_instance.name}."
     begin
       session = Net::SSH.start(node_instance.private_ip_address,
                                @node.admin_user,
@@ -139,25 +139,25 @@ class Manager
   def do_instance_reset(params)
     node_instance_id = params['node_instance_id']
     node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
-    logger.info "#{@stamp} Resetting instance #{node_instance.name}..."
+    logger.info "#{@stamp} Resetting instance #{node_instance.name}."
   end
 
   def do_instance_start(params)
     node_instance_id = params['node_instance_id']
     node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
-    logger.info "#{@stamp} Starting instance #{node_instance.name}..."
+    logger.info "#{@stamp} Starting instance #{node_instance.name}."
   end
 
   def do_instance_stop(params)
     node_instance_id = params['node_instance_id']
     node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
-    logger.info "#{@stamp} Stopping instance #{node_instance.name}..."
+    logger.info "#{@stamp} Stopping instance #{node_instance.name}."
   end
 
   def do_instance_terminate(params)
     node_instance_id = params['node_instance_id']
     node_instance = @node.node_instances.select { |i| i.id == node_instance_id }.first
-    logger.info "#{@stamp} Terminating instance #{node_instance.name}..."
+    logger.info "#{@stamp} Terminating instance #{node_instance.name}."
     destroy_cloud_instance(node_instance)
   end
 
@@ -227,7 +227,12 @@ class Manager
     FileUtils.cp(ramdisk_file, File.join(tmp_dir, 'boot'))
     FileUtils.cp(File.join(Powernode.config(:init_path), 'isolinux.bin'), tmp_dir)
     isolinux_cfg_file = File.join(tmp_dir, 'syslinux.cfg')
-    FileUtils.cp(File.join(Powernode.config(:init_path), 'syslinux.cfg'), isolinux_cfg_file)
+    isolinux_template_file = File.join(Powernode.config(:init_path), 'syslinux.cfg')
+    if File.exist?(isolinux_template_file)
+      FileUtils.cp(isolinux_template_file, isolinux_cfg_file)
+    else
+      File.write(isolinux_cfg_file, '')
+    end
     begin
       File.open(isolinux_cfg_file, 'a') do |f|
         f << "LABEL linux"
@@ -412,7 +417,7 @@ END
     keypair_name = @node.id
     keys = []
     begin
-      logger.info "#{@stamp} Attempting to retrieve keypairs..."
+      logger.info "#{@stamp} Attempting to retrieve keypairs."
       keys = @cloud.key_pairs.all
       key = keys.select { |k| k.name == keypair_name }.first
     rescue Exception => e
@@ -559,6 +564,7 @@ END
   end
 
   def netboot_sync(node_instance)
+    logger.info "#{@stamp} Synchronizing netboot config for instance #{node_instance.id}."
     FileUtils.mkdir_p(File.join(Powernode.config(:init_path), 'pxelinux.cfg'))
     FileUtils.mkdir_p(File.join(Powernode.config(:init_path), 'boot'))
     if node_instance.private_netboot_enabled && !node_instance.private_mac_address.empty?
@@ -615,8 +621,6 @@ END
           logger.error "#{@stamp} Exception: #{e.message}"
         end
       end
-    elsif !node_instance.private_netboot_enabled
-      FileUtils.rm(netboot_config_file) if File.exist?(netboot_config_file)
     end
   end
 end
