@@ -460,21 +460,20 @@ END
       instance_options[:region] = @node.node_provider.region
       instance_options[:key_name] = key.name
       instance_options[:user_data] = node_config
-      begin
-        if (cloud_instance = @cloud.servers.create(instance_options))
+      if (cloud_instance = @cloud.servers.create(instance_options))
+        node_instance = NodeInstance.new({ name: cloud_instance.id,
+                                           cloud: true,
+                                           private_ip_address: cloud_instance.private_ip_address,
+                                           public_ip_address: cloud_instance.public_ip_address,
+                                           state: cloud_instance.state,
+                                           started_at: cloud_instance.created_at })
+        begin
+          @parent_resource["node/#{@node.id}/instance.json"].post({ node_instance: node_instance }.to_json, accept: :json, content_type: :json)
           logger.info "#{@stamp} Created new instance: #{cloud_instance.id}"
-          node_instance = NodeInstance.new({ name: cloud_instance.id,
-                                             cloud: true,
-                                             private_ip_address: cloud_instance.private_ip_address,
-                                             public_ip_address: cloud_instance.public_ip_address,
-                                             state: cloud_instance.state,
-                                             started_at: cloud_instance.created_at })
-          unless @parent_resource["node/#{@node.id}/instance.json"].post({ node_instance: node_instance }.to_json, accept: :json, content_type: :json)
-            @cloud.servers.destroy(cloud_instance.id)
-          end
+        rescue Exception => e
+          @cloud.servers.destroy(cloud_instance.id)
+          logger.error "#{@stamp} Exception: #{e.message}"
         end
-      rescue Exception => e
-        logger.error "#{@stamp} Exception: #{e.message}"
       end
     end
   end
