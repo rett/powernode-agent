@@ -483,7 +483,7 @@ END
     <<END
 export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ID=#{@node_instance ? @node_instance.id : @node.id}
-KEY=#{@node_instance.manager_key.blank? ? @node.manager_key : @node_instance.manager_key }
+KEY=#{(@node_instance && !@node_instance.manager_key.blank?) ? @node_instance.manager_key : @node.manager_key}
 PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)}
 API_URL=#{Powernode.config(:api_url)}
 ADMIN_USER=#{@node.admin_user}
