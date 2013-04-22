@@ -235,7 +235,7 @@ class Manager
     end
     begin
       File.open(isolinux_cfg_file, 'a') do |f|
-        f << "LABEL linux"
+        f << "LABEL alchemy\n"
         f << "KERNEL /boot/#{@node.node_platform.id}.kernel\n"
         f << "RAMDISK /boot/#{@node.node_platform.id}.ramdisk\n"
       end
@@ -603,7 +603,7 @@ END
         begin
           File.open(netboot_cfg_file, 'a') do |f|
             f << "# Configured: #{node_instance.private_netboot_configured_at}\n"
-            f << "LABEL linux\n"
+            f << "LABEL alchemy\n"
             f << "KERNEL /boot/#{kernel_file_name}\n"
             f << "RAMDISK /boot/#{ramdisk_file_name}\n"
             f << "APPEND PARENT=#{Powernode.config(:proxy_url).nil? ? Powernode.config(:parent_url) : Powernode.config(:proxy_url)} " +
