@@ -6,12 +6,10 @@ proxy_url: http://127.0.0.1:4567
 realm: Node Alchemy
 module_compression: xz
 log_cycle: daily
-
-iso_path: /opt/powernode/isos
-kernel_path: /opt/powernode/kernels
+init_expire: 0:01:00
+init_path: /opt/powernode/init
 log_path: /opt/powernode/manager/log
 module_path: /opt/powernode/modules
-syslinux_path: /opt/powernode/syslinux
 tmp_path: /opt/powernode/manager/tmp
 
 smtp_from_email: support@nodealchemy.com
@@ -29,7 +27,7 @@ ssh_key_path: /opt/powernode/manager/keys
 ssh_port: 22
 
 # Encryption options
-encrypted_attributes: [aws_secret_access_key, ssh_key]
+encrypted_attributes: [aws_secret_access_key, manager_key, ssh_key]
 encryption_cipher: aes-256-cbc
 encryption_key: insert_random_key_here
 encryption_key_length: 64

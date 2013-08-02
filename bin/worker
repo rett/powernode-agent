@@ -45,7 +45,7 @@ pool_stop()
   pool_getpid
   if [ "${PID}" ]; then
     echo "Stopping ${WORKER} pool..."
-    kill -TERM $PID
+    kill -KILL $PID
     echo "Waiting for workers to finish..."
     while [ -f "${PIDFILE}" ]; do
       pool_getpid
