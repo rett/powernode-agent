@@ -8,57 +8,72 @@ require 'active_support/time'
 require 'json'
 require 'restclient'
 require 'sidekiq'
+require 'sidekiq-encryptor'
 require 'sidekiq-unique-jobs'
 require 'powernode'
 require 'powernode/models'
 require 'manager'
 
 Sidekiq.configure_client do |config|
-  config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
+  config.redis = { namespace: PowerNode.config(:redis_namespace), url: PowerNode.config(:redis_server) }
+  config.client_middleware do |chain|
+    chain.add Sidekiq::Encryptor::Client, key: PowerNode.config('redis_encryption_key') if PowerNode.config('redis_encryption_key')
+  end
 end
 
 class Poller
-  include Powernode
-  Powernode.logger_init(Powernode.config(:poller_logfile), Powernode.config(:poller_loglevel))
+  include PowerNode
 
   def initialize
-    trap('INT') do
-      logger.warn 'Stopping poller...'
-      $shutdown = true
+    ['TERM', 'INT'].each do |signal|
+      trap(signal) do
+        Thread.new do
+          logger.warn 'Stopping poller.'
+          $shutdown = true
+        end
+      end
     end
-    trap('TERM') do
-      logger.warn 'Stopping poller...'
-      $shutdown = true
-    end
-    logger.info "Poller started."
-  end
-
-  def poll
-    parent_resource = RestClient::Resource.new(Powernode.config(:parent_url) + '/api/v1',
-                                               Powernode.config(:id),
-                                               Powernode.config(:key))
-    begin
-      nodes = JSON.parse(parent_resource['nodes'].get).collect { |n| Node.new(n) }
-    rescue => e
-      logger.error "Exception: #{e.message}"
-    end
-    nodes.is_a?(Array) && nodes.each do |node|
-      enqueue_message(:poll_node, node)
-    end
-    sleep Powernode.config(:poller_interval)
+    @parent = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1', PowerNode.config(:id), PowerNode.config(:key))
   end
 
   def enqueue_message(command, node)
     message = ActiveSupport::JSON.encode({ 'command' => command, params: { 'node_id' => node.id } })
     logger.info "Queued #{command} for node #{node.id}." if Manager.perform_async(message)
   end
-end
 
-poller = Poller.new
-loop do
-  poller.poll
-  if $shutdown
-    poller.logger.warn 'Poller stopped.'
-    exit 0
+  def poll
+    begin
+      logger.info 'Retrieving list of nodes from parent.'
+      nodes = JSON.parse(@parent['nodes'].get).collect { |n| Node.new(n) }
+    rescue => e
+      logger.error "Exception: #{e.message}"
+    end
+
+    nodes.is_a?(Array) && nodes.each do |node|
+      enqueue_message(:poll_node, node)
+    end
+    sleep PowerNode.config(:poller_interval)
   end
 end
+
+def logger
+  if @logger.nil?
+    @logger = Logger.new(File.join(PowerNode.config(:log_path), PowerNode.config(:poller_logfile)), PowerNode.config(:log_cycle))
+    @logger.level = Logger.const_get(PowerNode.config(:poller_loglevel).upcase)
+  end
+  @logger
+end
+
+def run!
+  poller = Poller.new
+  logger.info 'Poller started.'
+  loop do
+    poller.poll
+    if $shutdown
+      logger.warn 'Poller stopped.'
+      exit 0
+    end
+  end
+end
+
+run!

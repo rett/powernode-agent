@@ -1,5 +1,5 @@
 class Node
-  include Powernode::ModelExtensions
+  include PowerNode::ModelExtensions
 
   def build_objects
     self.node_instance_type  = NodeInstanceType.new(node_instance_type) if self.respond_to?(:node_instance_type)
@@ -27,6 +27,6 @@ class Node
   end
 
   def ssh_key_file
-    File.join(Powernode.config(:ssh_key_path), "#{id}.pem")
+    File.join(PowerNode.config(:ssh_key_path), "#{id}.pem")
   end
 end

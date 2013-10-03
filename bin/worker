@@ -1,9 +1,10 @@
 #!/usr/bin/env sh
 
-WORKER="$(basename $0)"
-MANAGER="$(dirname $0)/../lib/${WORKER}.rb"
-CFGFILE="$(dirname $0)/../${WORKER}.yml"
-PIDFILE="$(dirname $0)/../tmp/${WORKER}.pid"
+NAME="$(basename $0)"
+CFGFILE="$(dirname $0)/../${NAME}.yml"
+LOGFILE="$(dirname $0)/../log/${NAME}.log"
+WORKER="$(dirname $0)/../lib/${NAME}.rb"
+PIDFILE="$(dirname $0)/../tmp/pids/${NAME}.pid"
 
 pool_getpid()
 {
@@ -22,8 +23,8 @@ pool_run()
 {
   pool_getpid
   if [ ! "${PID}" ]; then
-    echo "Running ${WORKER} pool..."
-    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r ${MANAGER}
+    echo "Running ${NAME} pool..."
+    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r ${WORKER}
   fi
 }
 
@@ -31,8 +32,8 @@ pool_start()
 {
   pool_getpid
   if [ ! "${PID}" ]; then
-    echo "Starting ${WORKER} pool..."
-    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r "${MANAGER}" &
+    echo "Starting ${NAME} pool..."
+    bundle exec sidekiq -C "${CFGFILE}" -L "${LOGFILE}" -P "${PIDFILE}" -r "${WORKER}" -d
     while [ ! -f "${PIDFILE}" ]; do
       pool_getpid
       sleep 1
@@ -44,7 +45,7 @@ pool_stop()
 {
   pool_getpid
   if [ "${PID}" ]; then
-    echo "Stopping ${WORKER} pool..."
+    echo "Stopping ${NAME} pool..."
     kill -KILL $PID
     echo "Waiting for workers to finish..."
     while [ -f "${PIDFILE}" ]; do
@@ -58,9 +59,9 @@ pool_status()
 {
   pool_getpid
   if [ "${PID}" ]; then
-    echo "${WORKER}: running"
+    echo "${NAME}: running"
   else
-    echo "${WORKER}: stopped"
+    echo "${NAME}: stopped"
   fi
 }
 

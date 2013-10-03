@@ -12,6 +12,8 @@ require 'rack/auth/basic'
 require 'rack/auth/abstract/request'
 require 'redis'
 require 'restclient'
+require 'sidekiq'
+require 'sidekiq-encryptor'
 require 'sinatra/base'
 require 'sinatra/multi_route'
 require 'sinatra/synchrony'
@@ -20,16 +22,17 @@ require 'thin'
 require 'powernode'
 require 'powernode/models'
 
-Powernode.logger_init(Powernode.config(:proxy_logfile), Powernode.config(:log_cycle), Powernode.config(:proxy_loglevel))
-
 Sidekiq.configure_client do |config|
-  config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
+  config.redis = { namespace: PowerNode.config(:redis_namespace), url: PowerNode.config(:redis_server) }
+  config.client_middleware do |chain|
+    chain.add Sidekiq::Encryptor::Client, key: PowerNode.config('redis_encryption_key') if PowerNode.config('redis_encryption_key')
+  end
 end
 
 Redis.current = Sidekiq::RedisConnection
 
 class Proxy < Sinatra::Base
-  include Powernode
+  include PowerNode
   register Sinatra::MultiRoute
   register Sinatra::Synchrony
 
@@ -38,99 +41,120 @@ class Proxy < Sinatra::Base
     enable :sessions
   end
 
-  def self.run!
-    rack_handler_config = { Host: Powernode.config(:proxy_ip),
-                            Port: Powernode.config(:proxy_port) }
-    ssl_options = {
-      cert_chain_file: File.join(Powernode.config(:ssl_chain_file)),
-      private_key_file: File.join(Powernode.config(:ssl_key_file))
-    }
-    Rack::Handler::Thin.run(self, rack_handler_config) do |server|
-      server.ssl = true
-      server.ssl_options = ssl_options
-    end
-  end
-
-  get '/api/v1/node/modules.csv', '/api/v1/node/module/:node_module_id.html' do
+  get %r{/api/v1/node/(?<node>\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/modules.csv} do
     auth = Rack::Auth::Basic::Request.new(@env)
     id, key = auth.credentials
-    parent_resource = RestClient::Resource.new(Powernode.config(:parent_url) + '/api/v1/node', id, key)
+    node_id = params[:node]
+    parent_resource = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1/node/' + node_id, id, key)
     begin
-      @node = Node.new(JSON.parse(parent_resource.get(params: { brief: true })))
       @node_modules = JSON.parse(parent_resource['modules'].get).collect { |m| NodeModule.new(m) }
     rescue => e
       logger.error "Exception: #{e.message}"
     end
-
-    if @node && @node_modules
+    if @node_modules
       @node_modules.each do |node_module|
         if node_module.data_file_name
-          module_file_name = File.join(Powernode.config(:module_path), node_module.data_file_name)
-          unless File.exist?(module_file_name) && node_module.checksum == Digest::SHA2.new(Powernode.config(:checksum_bitlength) || 256).hexdigest(File.binread(module_file_name))
-            node_module.status = 'WAIT'
+          module_file_name = File.join(PowerNode.config(:module_path), node_module.data_file_name)
+          unless File.exist?(module_file_name) && node_module.data_checksum == Digest::SHA2.new(PowerNode.config(:checksum_bitlength) || 256).hexdigest(File.binread(module_file_name))
             enqueue_message(@node, node_module, 'transfer')
+            node_module.status = 'WAIT'
           end
         end
       end
-      if params['node_module_id']
-        if (node_module = @node_modules.select { |m| m.id == params['node_module_id'] }.first && node_module.data_file_name)
-          module_file_name = File.join(Powernode.config(:module_path), node_module.data_file_name)
-          if node_module.status == 'READY'
-            logger.info "Sending module: #{node_module.id}, #{module_file_name}"
-            send_file(module_file_name)
-          else
-            logger.info "Sending status 202"
-            status 202
-          end
+      csv_string = CSV.generate({ force_quotes: true }) do |csv|
+        @node_modules.each do |node_module|
+          csv << [node_module.status,
+                  node_module.id,
+                  node_module.data_file_version,
+                  node_module.data_checksum,
+                  node_module.name,
+                  node_module.init_start,
+                  node_module.init_stop,
+                  node_module.init_restart,
+                  node_module.effective_priority,
+                  node_module.reboot_required,
+                  node_module.copy_path] if node_module.data_checksum
         end
-      else
-        csv_string = CSV.generate({ force_quotes: true }) do |csv|
-          @node_modules.each do |node_module|
-            csv << [node_module.status,
-                    node_module.id,
-                    node_module.data_file_version,
-                    node_module.checksum,
-                    node_module.name,
-                    node_module.init,
-                    node_module.effective_priority.to_s.rjust(6, '0'),
-                    node_module.reboot_required,
-                    node_module.copy_path] if node_module.checksum
-          end
-        end
-        content_type('text/csv')
-        csv_string
       end
+      content_type('text/csv')
+      csv_string
     else
       status 202
     end
   end
 
+  get %r{/api/v1/node/(?<node>\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/module/(?<node_module>\w{8}-\w{4}-\w{4}-\w{4}-\w{12}).html} do
+    auth = Rack::Auth::Basic::Request.new(@env)
+    id, key = auth.credentials
+    node_id = params[:node]
+    node_module_id = params[:node_module]
+    parent_resource = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1/node/' + node_id, id, key)
+    begin
+      @node_module = NodeModule.new(JSON.parse(parent_resource["module/#{node_module_id}"].get))
+    rescue => e
+      logger.error "Exception: #{e.message}"
+    end
+    if @node_module
+      module_file_name = File.join(PowerNode.config(:module_path), @node_module.data_file_name)
+      if File.exist?(module_file_name) && node_module.data_checksum == Digest::SHA2.new(PowerNode.config(:checksum_bitlength) || 256).hexdigest(File.binread(module_file_name))
+        logger.info "Sending module: #{@node_module.id}, #{module_file_name}"
+        send_file(module_file_name)
+      else
+        enqueue_message(@node, node_module, 'transfer')
+        logger.info "Sending status 202"
+        status 202
+      end
+    end
+  end
+
   route :get, :post, '/api/v1/*' do |path|
-    if Powernode.config(:proxy_redirect) == 'true'
-      logger.info "Redirecting request to #{Powernode.config(:parent_url)}/api/v1/#{path}."
+    if PowerNode.config(:proxy_redirect) == 'true'
+      logger.info "Redirecting request to #{PowerNode.config(:parent_url)}/api/v1/#{path}."
       begin
-        redirect Powernode.config(:parent_url) + "/api/v1/#{path}"
+        redirect PowerNode.config(:parent_url) + "/api/v1/#{path}"
       rescue => e
         logger.error "Exception: #{e.message}"
       end
     else
       auth = Rack::Auth::Basic::Request.new(@env)
       node_id, key = auth.credentials
-      parent_request = RestClient::Resource.new(Powernode.config(:parent_url) + '/api/v1/' + params[:splat].join, node_id, key)
+      parent_request = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1/' + params[:splat].join, node_id, key)
       begin
-        logger.info "Resuest method: #{request.env["REQUEST_METHOD"]}"
+        logger.info "Forwarding #{request.env['REQUEST_METHOD']} #{request.env['REQUEST_PATH']}"
         method = request.env["REQUEST_METHOD"].gsub(/\W/, '').downcase.to_sym
         parent_request.send(method)
       end
     end
   end
 
-  protected
+  private
 
   def enqueue_message(node, node_module, operation)
     message = ActiveSupport::JSON.encode({ node: node, node_module: node_module, operation: operation })
     logger.info "Queued #{operation} for module #{node_module.id}." if Store.perform_async(message)
   end
 
-  run!
+  def logger
+    if @logger.nil?
+      @logger = Logger.new(File.join(PowerNode.config(:log_path), PowerNode.config(:proxy_logfile)), PowerNode.config(:log_cycle))
+      @logger.level = Logger.const_get(PowerNode.config(:proxy_loglevel).upcase)
+    end
+    @logger
+  end
+
+  def run!
+    rack_handler_config = { Host: PowerNode.config(:proxy_ip), Port: PowerNode.config(:proxy_port) }
+    ssl_options = {
+        cert_chain_file: File.join(PowerNode.config(:ssl_chain_file)),
+        private_key_file: File.join(PowerNode.config(:ssl_key_file))
+    }
+    Rack::Handler::Thin.run(self, rack_handler_config) do |server|
+      if PowerNode.config(:ssl_enabled)
+        server.ssl = true
+        server.ssl_options = ssl_options
+      end
+    end
+  end
 end
+
+Proxy.run!

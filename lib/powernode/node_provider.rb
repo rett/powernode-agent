@@ -1,3 +1,3 @@
 class NodeProvider
-  include Powernode::ModelExtensions
+  include PowerNode::ModelExtensions
 end
