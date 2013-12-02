@@ -4,10 +4,14 @@ class Node
   def build_objects
     self.node_instance_type  = NodeInstanceType.new(node_instance_type) if self.respond_to?(:node_instance_type)
     self.node_instances = node_instances.collect { |i| NodeInstance.new(i) } if self.respond_to?(:node_instances)
-    self.node_modules   = node_modules.collect { |m| NodeModule.new(m) } if self.respond_to?(:node_modules)
-    self.node_platform  = NodePlatform.new(node_platform) if self.respond_to?(:node_platform)
-    self.node_provider  = NodeProvider.new(node_provider) if self.respond_to?(:node_provider)
-    self.node_template  = NodeTemplate.new(node_template) if self.respond_to?(:node_template)
+    self.node_modules = node_modules.collect { |m| NodeModule.new(m) } if self.respond_to?(:node_modules)
+    self.node_platform = NodePlatform.new(node_platform) if self.respond_to?(:node_platform)
+    self.node_provider = NodeProvider.new(node_provider) if self.respond_to?(:node_provider)
+    self.node_template = NodeTemplate.new(node_template) if self.respond_to?(:node_template)
+    if self.respond_to?(:puppet_modules)
+      self.puppet_modules = puppet_modules.collect { |m| PuppetModule.new(m) }
+      self.puppet_modules.collect { |m| m.puppet_resources = m.puppet_resources.collect { |r| PuppetResource.new(r) } }
+    end
   end
 
   def cloud_instances

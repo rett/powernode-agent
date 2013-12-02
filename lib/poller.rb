@@ -49,8 +49,10 @@ class Poller
       logger.error "Exception: #{e.message}"
     end
 
-    nodes.is_a?(Array) && nodes.each do |node|
-      enqueue_message(:poll_node, node)
+    if nodes.is_a?(Array)
+      nodes.each do |node|
+        enqueue_message(:poll_node, node)
+      end
     end
     sleep PowerNode.config(:poller_interval)
   end

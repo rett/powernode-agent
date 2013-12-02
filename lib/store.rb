@@ -57,10 +57,10 @@ class Store
   protected
 
   def do_transfer
-    module_file_name = "#{PowerNode.config(:module_path)}/#{@node_module.data_file_name}"
+    module_file_name = File.join(PowerNode.config(:module_path)}, @node_module.uuid_partition, @node_module.data_file_name)
     logger.info "Attempting to download #{@node_module.data_file_name}."
     begin
-      FileUtils.mkdir_p(PowerNode.config(:module_path))
+      FileUtils.mkdir_p(File.join(PowerNode.config(:module_path)}, @node_module.uuid_partition))
       FileUtils.touch(module_file_name + '.tmp')
     rescue => e
       logger.error "Exception: #{e}"

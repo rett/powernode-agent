@@ -4,7 +4,10 @@ key: secret_key
 parent_url: http://127.0.0.1:3000
 proxy_url:
 realm: Node Alchemy
+domain: nodealchemy.com
 module_compression: xz
+checksum_bitlength: 256
+checksum_util: sha256sum
 log_cycle: daily
 init_expire: 0:01:00
 init_path: /opt/powernode/init
@@ -40,21 +43,6 @@ encryption_prefix: "encrypted:"
 redis_encryption_key: insert_random_key_here
 redis_namespace: alchemy
 redis_server: redis://localhost:6379/0
-
-# Node options
-api_url: "${PARENT}/api/v1/node/${ID}"
-memory_dir: "${BASE_DIR}/memory"
-modules_dir: "${UNION}${MEMORY}/modules"
-branches_dir: "${UNION}${MEMORY}/branches"
-changes_dir: "${UNION}${MEMORY}/changes"
-ram_dir: "${UNION}${MEMORY}/ram"
-volumes_dir: "${UNION}${MEMORY}/volumes"
-checksum_bitlength: 256
-checksum_util: sha256sum
-loop_devices: 256
-module_extension: .mo
-module_info_extension: .info
-module_update_extension: .update
 
 # Poller options
 poller_interval: 10

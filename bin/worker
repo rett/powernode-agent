@@ -6,10 +6,29 @@ LOGFILE="$(dirname $0)/../log/${NAME}.log"
 WORKER="$(dirname $0)/../lib/${NAME}.rb"
 PIDFILE="$(dirname $0)/../tmp/pids/${NAME}.pid"
 
+manager_requirements="mkisofs mksquashfs rsync ruby sudo"
+store_requirements="ruby"
+
+check_requirements()
+{
+  requirements="${NAME}_requirements"
+  requirements="${!requirements}"
+  for command in ${requirements}; do
+    if [ ! -f "$(which ${command})" ]; then
+      not_found="${command} ${not_found}"
+    fi
+  done
+  if [ -n "${not_found}" ]; then
+    echo "Not found in path: ${not_found}"
+    echo "Aborting!"
+    exit 1
+  fi
+}
+
 pool_getpid()
 {
   if [ -f "${PIDFILE}" ]; then
-    PID="$(cat $PIDFILE)"
+    PID="$(cat ${PIDFILE})"
     if [ ! "$(ps aux | grep ${PID} | grep sidekiq 2>/dev/null)" ]; then
       rm "${PIDFILE}"
       unset PID
@@ -21,6 +40,7 @@ pool_getpid()
 
 pool_run()
 {
+  check_requirements
   pool_getpid
   if [ ! "${PID}" ]; then
     echo "Running ${NAME} pool..."
@@ -30,6 +50,7 @@ pool_run()
 
 pool_start()
 {
+  check_requirements
   pool_getpid
   if [ ! "${PID}" ]; then
     echo "Starting ${NAME} pool..."
