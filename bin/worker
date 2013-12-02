@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
 NAME="$(basename $0)"
 CFGFILE="$(dirname $0)/../${NAME}.yml"
