@@ -1,8 +1,8 @@
 module PowerNode
   module ModelExtensions
-    def initialize(item)
-      raise "expected Hash param" unless item.kind_of? Hash
-      item.each do |key, value|
+    def initialize(params = {})
+      raise "expected Hash param" unless params.kind_of? Hash
+      params.each do |key, value|
         value = String.new if value.nil?
         if PowerNode.config('encrypted_attributes').include?(key) && value.match(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/)
           instance_variable_set(sanitize_key(key), value.sub(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/, ''))
@@ -23,6 +23,14 @@ module PowerNode
       end
       define_singleton_method('dirty?') { false } unless self.respond_to?(:dirty?)
       self.build_objects if self.respond_to?(:build_objects)
+    end
+
+    def to_hash
+      Hash[instance_variables.map { |name| [name.to_s.delete("@"), instance_variable_get(name)] } ]
+    end
+
+    def to_json(*a)
+      to_hash.to_json(a)
     end
 
     private

@@ -8,6 +8,7 @@ class Node
     self.node_platform = NodePlatform.new(node_platform) if self.respond_to?(:node_platform)
     self.node_provider = NodeProvider.new(node_provider) if self.respond_to?(:node_provider)
     self.node_template = NodeTemplate.new(node_template) if self.respond_to?(:node_template)
+    self.operations = operations.collect { |o| Operation.new(o) } if self.respond_to?(:operations)
     if self.respond_to?(:puppet_modules)
       self.puppet_modules = puppet_modules.collect { |m| PuppetModule.new(m) }
       self.puppet_modules.collect { |m| m.puppet_resources = m.puppet_resources.collect { |r| PuppetResource.new(r) } }

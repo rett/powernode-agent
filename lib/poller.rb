@@ -37,7 +37,7 @@ class Poller
   end
 
   def enqueue_message(command, node)
-    message = ActiveSupport::JSON.encode({ 'command' => command, params: { 'node_id' => node.id } })
+    message = ActiveSupport::JSON.encode({ command: command, node_id: node.id })
     logger.info "Queued #{command} for node #{node.id}." if Manager.perform_async(message)
   end
 
