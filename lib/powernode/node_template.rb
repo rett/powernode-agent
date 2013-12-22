@@ -1,3 +1,3 @@
 class NodeTemplate
-  include Powernode::ModelExtensions
+  include PowerNode::ModelExtensions
 end

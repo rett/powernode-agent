@@ -1,3 +1,3 @@
 class NodeInstance
-  include Powernode::ModelExtensions
+  include PowerNode::ModelExtensions
 end

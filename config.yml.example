@@ -2,9 +2,12 @@
 id: 12345123-3456-012f-7654-1027e1212121
 key: secret_key
 parent_url: http://127.0.0.1:3000
-proxy_url: http://127.0.0.1:4567
+proxy_url:
 realm: Node Alchemy
+domain: nodealchemy.com
 module_compression: xz
+checksum_bitlength: 256
+checksum_util: sha256sum
 log_cycle: daily
 init_expire: 0:01:00
 init_path: /opt/powernode/init
@@ -12,6 +15,7 @@ log_path: /opt/powernode/manager/log
 module_path: /opt/powernode/modules
 tmp_path: /opt/powernode/manager/tmp
 
+# SMTP options
 smtp_from_email: support@nodealchemy.com
 smtp_server: mail.powernode.net
 smtp_port: 25
@@ -21,6 +25,8 @@ smtp_password:
 smtp_authentication:
 smtp_enable_starttls_auto: true
 
+# SSL options
+ssl_enabled: true
 ssl_chain_file: /opt/powernode/manager/certificate.pem
 ssl_key_file: /opt/powernode/manager/certificate.key
 ssh_key_path: /opt/powernode/manager/keys
@@ -33,41 +39,28 @@ encryption_key: insert_random_key_here
 encryption_key_length: 64
 encryption_prefix: "encrypted:"
 
-# Redis configuration
-redis_server: redis://localhost:6379/0
+# Redis options
+redis_encryption_key: insert_random_key_here
 redis_namespace: alchemy
+redis_server: redis://localhost:6379/0
 
-# Node configuration
-api_url: "${PARENT}/api/v1/node/${ID}"
-memory_dir: "${BASE_DIR}/memory"
-modules_dir: "${UNION}${MEMORY}/modules"
-branches_dir: "${UNION}${MEMORY}/branches"
-changes_dir: "${UNION}${MEMORY}/changes"
-ram_dir: "${UNION}${MEMORY}/ram"
-volumes_dir: "${UNION}${MEMORY}/volumes"
-checksum_bitlength: 256
-checksum_util: sha256sum
-loop_devices: 256
-module_extension: .mo
-module_info_extension: .info
-module_update_extension: .update
-
-# Poller configuration
+# Poller options
 poller_interval: 10
 poller_logfile: poller.log
 poller_loglevel: debug
 
-# Proxy configuration
+# Proxy options
+proxy_ip: 0.0.0.0
+proxy_port: 4567
 proxy_logfile: proxy.log
 proxy_loglevel: debug
-proxy_port: 4567
 proxy_redirect: false
 
-# Mailer configuration
+# Mailer options
 mailer_log_file: mailer.log
 mailer_log_level: debug
 
-# Manager configuration
+# Manager options
 manager_cloud_error_limit: 3
 manager_job_expiration: 3600
 manager_job_retries: 0
@@ -75,7 +68,7 @@ manager_logfile: manager.log
 manager_loglevel: debug
 manager_queue: manager
 
-# Store configuration
+# Store options
 store_queue: store
 store_logfile: store.log
 store_loglevel: debug

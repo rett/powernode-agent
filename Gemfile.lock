@@ -1,96 +1,108 @@
 GEM
   remote: https://rubygems.org/
   specs:
-    activesupport (3.2.12)
-      i18n (~> 0.6)
-      multi_json (~> 1.0)
-    addressable (2.3.3)
-    backports (3.0.3)
-    builder (3.2.0)
-    celluloid (0.12.4)
-      facter (>= 1.6.12)
-      timers (>= 1.0.0)
-    connection_pool (1.0.0)
+    activesupport (4.0.2)
+      i18n (~> 0.6, >= 0.6.4)
+      minitest (~> 4.2)
+      multi_json (~> 1.3)
+      thread_safe (~> 0.1)
+      tzinfo (~> 0.3.37)
+    addressable (2.3.5)
+    atomic (1.1.14)
+    backports (3.3.5)
+    builder (3.2.2)
+    celluloid (0.15.2)
+      timers (~> 1.1.0)
+    connection_pool (1.2.0)
     cookiejar (0.3.0)
     daemons (1.1.9)
-    em-http-request (1.0.3)
-      addressable (>= 2.2.3)
+    em-http-request (1.1.2)
+      addressable (>= 2.3.4)
       cookiejar
-      em-socksify
-      eventmachine (>= 1.0.0.beta.4)
-      http_parser.rb (>= 0.5.3)
+      em-socksify (>= 0.3)
+      eventmachine (>= 1.0.3)
+      http_parser.rb (>= 0.6.0)
     em-resolv-replace (1.1.3)
-    em-socksify (0.2.1)
+    em-socksify (0.3.0)
       eventmachine (>= 1.0.0.beta.4)
     em-synchrony (1.0.3)
       eventmachine (>= 1.0.0.beta.1)
-    eventmachine (1.0.1)
-    excon (0.19.1)
-    facter (1.6.17)
-    fog (1.9.0)
+    eventmachine (1.0.3)
+    excon (0.31.0)
+    fernet (2.0)
+      valcro (= 0.1)
+    fog (1.19.0)
       builder
-      excon (~> 0.14)
+      excon (~> 0.31.0)
       formatador (~> 0.2.0)
       mime-types
       multi_json (~> 1.0)
-      net-scp (~> 1.0.4)
+      net-scp (~> 1.1)
       net-ssh (>= 2.1.3)
-      nokogiri (~> 1.5.0)
+      nokogiri (~> 1.5)
       ruby-hmac
     formatador (0.2.4)
-    haml (4.0.0)
+    haml (4.0.4)
       tilt
-    http_parser.rb (0.5.3)
-    i18n (0.6.4)
+    http_parser.rb (0.6.0)
+    i18n (0.6.9)
+    json (1.8.1)
     macaddr (1.6.1)
       systemu (~> 2.5.0)
-    mail (2.5.3)
-      i18n (>= 0.4.0)
-      mime-types (~> 1.16)
-      treetop (~> 1.4.8)
-    mime-types (1.21)
-    multi_json (1.6.1)
-    net-scp (1.0.4)
-      net-ssh (>= 1.99.1)
-    net-sftp (2.1.1)
+    mail (2.2.7)
+      activesupport (>= 2.3.6)
+      mime-types
+      treetop (>= 1.4.5)
+    mime-types (2.0)
+    mini_portile (0.5.2)
+    minitest (4.7.5)
+    multi_json (1.8.2)
+    net-scp (1.1.2)
       net-ssh (>= 2.6.5)
-    net-ssh (2.6.5)
-    nokogiri (1.5.6)
+    net-sftp (2.1.2)
+      net-ssh (>= 2.6.5)
+    net-ssh (2.7.0)
+    nokogiri (1.6.1)
+      mini_portile (~> 0.5.0)
     polyglot (0.3.3)
-    pony (1.4)
-      mail (> 2.0)
+    pony (1.6.2)
+      mail (>= 2.0)
     rack (1.5.2)
-    rack-fiber_pool (0.9.2)
-    rack-protection (1.3.2)
+    rack-fiber_pool (0.9.3)
+    rack-protection (1.5.1)
       rack
     rack-test (0.6.2)
       rack (>= 1.0)
-    redis (3.0.2)
-    redis-namespace (1.2.1)
-      redis (~> 3.0.0)
-    redis-objects (0.7.0)
+    rake (10.1.1)
+    redis (3.0.6)
+    redis-namespace (1.4.1)
+      redis (~> 3.0.4)
+    redis-objects (0.8.0)
       redis (>= 3.0.2)
     rest-client (1.6.7)
       mime-types (>= 1.16)
     ruby-hmac (0.4.0)
-    sidekiq (2.7.5)
-      celluloid (~> 0.12.0)
-      connection_pool (~> 1.0)
-      multi_json (~> 1)
-      redis (~> 3)
-      redis-namespace
-    sidekiq-unique-jobs (2.3.2)
-      sidekiq (>= 2.2.0)
-    sinatra (1.3.5)
+    sidekiq (2.17.1)
+      celluloid (>= 0.15.2)
+      connection_pool (>= 1.0.0)
+      json
+      redis (>= 3.0.6)
+      redis-namespace (>= 1.3.1)
+    sidekiq-encryptor (0.1.3)
+      fernet (>= 2.0rc2, < 3.0)
+      sidekiq (>= 2.5, < 3.0)
+    sidekiq-middleware (0.1.4)
+      sidekiq (>= 2.12.4, < 3)
+    sinatra (1.4.4)
       rack (~> 1.4)
-      rack-protection (~> 1.3)
-      tilt (~> 1.3, >= 1.3.3)
-    sinatra-contrib (1.3.2)
+      rack-protection (~> 1.4)
+      tilt (~> 1.3, >= 1.3.4)
+    sinatra-contrib (1.4.2)
       backports (>= 2.0)
-      eventmachine
+      multi_json
       rack-protection
       rack-test
-      sinatra (~> 1.3.0)
+      sinatra (~> 1.4.0)
       tilt (~> 1.3)
     sinatra-synchrony (0.4.1)
       em-http-request (~> 1.0)
@@ -100,23 +112,31 @@ GEM
       rack-fiber_pool (~> 0.9)
       sinatra (~> 1.0)
     systemu (2.5.2)
-    thin (1.5.0)
+    thin (1.6.1)
       daemons (>= 1.0.9)
-      eventmachine (>= 0.12.6)
+      eventmachine (>= 1.0.0)
       rack (>= 1.0.0)
-    tilt (1.3.3)
+    thread_safe (0.1.3)
+      atomic
+    tilt (1.4.1)
     timers (1.1.0)
-    treetop (1.4.12)
+    treetop (1.4.15)
       polyglot
       polyglot (>= 0.3.1)
+    tzinfo (0.3.38)
+    unf (0.1.3)
+      unf_ext
+    unf_ext (0.0.6)
     uuid (2.3.7)
       macaddr (~> 1.0)
+    uuidtools (2.1.4)
+    valcro (0.1)
 
 PLATFORMS
   ruby
 
 DEPENDENCIES
-  activesupport (~> 3.2.12)
+  activesupport (~> 4.0.2)
   daemons
   fog
   haml
@@ -124,12 +144,16 @@ DEPENDENCIES
   net-sftp
   net-ssh
   pony
+  rake
   redis-objects
   rest-client
   sidekiq
-  sidekiq-unique-jobs
+  sidekiq-encryptor
+  sidekiq-middleware
   sinatra
   sinatra-contrib
   sinatra-synchrony
   thin
+  unf
   uuid
+  uuidtools

@@ -5,6 +5,7 @@
 *.key
 *.pem
 *.lic
+*.lock
 *.log*
 *.pid
 *.save

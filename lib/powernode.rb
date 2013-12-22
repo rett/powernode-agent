@@ -1,20 +1,17 @@
-require 'logger'
-
-module Powernode
+module PowerNode
   module ModelExtensions
-    def initialize(item)
-      @dirty = false
-      raise "expected Hash param" unless item.kind_of? Hash
-      item.each do |key, value|
+    def initialize(params = {})
+      raise "expected Hash param" unless params.kind_of? Hash
+      params.each do |key, value|
         value = String.new if value.nil?
-        if Powernode.config('encrypted_attributes').include?(key) && value.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
-          instance_variable_set(sanitize_key(key), value.sub(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/, ''))
-          define_singleton_method(key.to_s) { Powernode.decrypt(instance_variable_get(sanitize_key(key))) }
-          define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), Powernode.encrypt(val)) }
-        elsif Powernode.config('encrypted_attributes').include?(key)
-          instance_variable_set(sanitize_key(key), Powernode.encrypt(value))
-          define_singleton_method(key.to_s) { Powernode.decrypt(instance_variable_get(sanitize_key(key))) }
-          define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), Powernode.encrypt(val)) }
+        if PowerNode.config('encrypted_attributes').include?(key) && value.match(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/)
+          instance_variable_set(sanitize_key(key), value.sub(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/, ''))
+          define_singleton_method(key.to_s) { PowerNode.decrypt(instance_variable_get(sanitize_key(key))) }
+          define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), PowerNode.encrypt(val)) }
+        elsif PowerNode.config('encrypted_attributes').include?(key)
+          instance_variable_set(sanitize_key(key), PowerNode.encrypt(value))
+          define_singleton_method(key.to_s) { PowerNode.decrypt(instance_variable_get(sanitize_key(key))) }
+          define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), PowerNode.encrypt(val)) }
           define_singleton_method("#{key.to_s}_dirty") { true }
           define_singleton_method("dirty?") { true }
         else
@@ -28,7 +25,15 @@ module Powernode
       self.build_objects if self.respond_to?(:build_objects)
     end
 
-    protected
+    def to_hash
+      Hash[instance_variables.map { |name| [name.to_s.delete("@"), instance_variable_get(name)] } ]
+    end
+
+    def to_json(*a)
+      to_hash.to_json(a)
+    end
+
+    private
 
     def sanitize_key(key)
       "@#{key.to_s.gsub(/\W/, '')}".to_sym
@@ -40,12 +45,12 @@ module Powernode
     @config[key.to_s]
   end
 
-  def self.decrypt(data, encryption_cipher = Powernode.config('encryption_cipher'), encryption_key = Powernode.config('encryption_key'))
+  def self.decrypt(data, encryption_cipher = PowerNode.config('encryption_cipher'), encryption_key = PowerNode.config('encryption_key'))
     if data.size > 0 && encryption_cipher && encryption_key
       cipher = OpenSSL::Cipher.new(encryption_cipher)
       cipher.decrypt
       cipher.key = encryption_key
-      decrypted_data = URI.unescape(data.sub(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/, ''))
+      decrypted_data = URI.unescape(data.sub(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/, ''))
       decrypted_data = Base64.decode64(decrypted_data)
       cipher.iv = decrypted_data.slice!(0, 16)
       decrypted_data = cipher.update(decrypted_data) + cipher.final
@@ -55,8 +60,8 @@ module Powernode
     decrypted_data
   end
 
-  def self.encrypt(data, encryption_cipher = Powernode.config('encryption_cipher'), encryption_key = Powernode.config('encryption_key'))
-    if data.size > 0 && encryption_cipher && encryption_key && !data.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
+  def self.encrypt(data, encryption_cipher = PowerNode.config('encryption_cipher'), encryption_key = PowerNode.config('encryption_key'))
+    if data.size > 0 && encryption_cipher && encryption_key && !data.match(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/)
       cipher = OpenSSL::Cipher.new(encryption_cipher)
       cipher.encrypt
       cipher.key = encryption_key
@@ -64,24 +69,10 @@ module Powernode
       encrypted_data = cipher.update(data) + cipher.final
       encrypted_data = iv + encrypted_data
       encrypted_data = Base64.encode64(encrypted_data)
-      encrypted_data = URI.escape(Powernode.config(:encryption_prefix) + encrypted_data)
+      encrypted_data = URI.escape(PowerNode.config(:encryption_prefix) + encrypted_data)
     else
       encrypted_data = data
     end
     encrypted_data
-  end
-
-  def self.logger_init(file_name, log_level)
-    @logger = Logger.new(File.join(Powernode.config(:log_path), file_name), Powernode.config(:log_cycle))
-    @logger.level = Logger.const_get(log_level.upcase)
-    @logger
-  end
-
-  def self.logger
-    @logger
-  end
-
-  def logger
-    Powernode.logger
   end
 end

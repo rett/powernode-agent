@@ -1,14 +1,34 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
-WORKER="$(basename $0)"
-MANAGER="$(dirname $0)/../lib/${WORKER}.rb"
-CFGFILE="$(dirname $0)/../${WORKER}.yml"
-PIDFILE="$(dirname $0)/../tmp/${WORKER}.pid"
+NAME="$(basename $0)"
+CFGFILE="$(dirname $0)/../${NAME}.yml"
+LOGFILE="$(dirname $0)/../log/${NAME}.log"
+WORKER="$(dirname $0)/../lib/${NAME}.rb"
+PIDFILE="$(dirname $0)/../tmp/pids/${NAME}.pid"
+
+manager_requirements="mkisofs mksquashfs rsync ruby sudo"
+store_requirements="ruby"
+
+check_requirements()
+{
+  requirements="${NAME}_requirements"
+  requirements="${!requirements}"
+  for command in ${requirements}; do
+    if [ ! -f "$(which ${command})" ]; then
+      not_found="${command} ${not_found}"
+    fi
+  done
+  if [ -n "${not_found}" ]; then
+    echo "Not found in path: ${not_found}"
+    echo "Aborting!"
+    exit 1
+  fi
+}
 
 pool_getpid()
 {
   if [ -f "${PIDFILE}" ]; then
-    PID="$(cat $PIDFILE)"
+    PID="$(cat ${PIDFILE})"
     if [ ! "$(ps aux | grep ${PID} | grep sidekiq 2>/dev/null)" ]; then
       rm "${PIDFILE}"
       unset PID
@@ -20,19 +40,21 @@ pool_getpid()
 
 pool_run()
 {
+  check_requirements
   pool_getpid
   if [ ! "${PID}" ]; then
-    echo "Running ${WORKER} pool..."
-    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r ${MANAGER}
+    echo "Running ${NAME} pool..."
+    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r ${WORKER}
   fi
 }
 
 pool_start()
 {
+  check_requirements
   pool_getpid
   if [ ! "${PID}" ]; then
-    echo "Starting ${WORKER} pool..."
-    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r "${MANAGER}" &
+    echo "Starting ${NAME} pool..."
+    bundle exec sidekiq -C "${CFGFILE}" -L "${LOGFILE}" -P "${PIDFILE}" -r "${WORKER}" -d
     while [ ! -f "${PIDFILE}" ]; do
       pool_getpid
       sleep 1
@@ -44,7 +66,7 @@ pool_stop()
 {
   pool_getpid
   if [ "${PID}" ]; then
-    echo "Stopping ${WORKER} pool..."
+    echo "Stopping ${NAME} pool..."
     kill -KILL $PID
     echo "Waiting for workers to finish..."
     while [ -f "${PIDFILE}" ]; do
@@ -58,9 +80,9 @@ pool_status()
 {
   pool_getpid
   if [ "${PID}" ]; then
-    echo "${WORKER}: running"
+    echo "${NAME}: running"
   else
-    echo "${WORKER}: stopped"
+    echo "${NAME}: stopped"
   fi
 }
 

@@ -1,3 +1,3 @@
 class NodePlatform
-  include Powernode::ModelExtensions
+  include PowerNode::ModelExtensions
 end

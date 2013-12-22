@@ -2,8 +2,8 @@ Gem::Specification.new do |s|
   s.name        = 'powernode'
   s.version     = '0.0.1'
   s.date        = '2012-12-12'
-  s.summary     = 'Powernode Management Suite Models'
-  s.description = 'Models for use in Powernode Poller, Manager, Proxy and Store'
+  s.summary     = 'PowerNode Management Suite Models'
+  s.description = 'Models for use in PowerNode Poller, Manager, Proxy and Store'
   s.authors     = ['Everett C. Haimes III']
   s.email       = 'everett@nodealchemy.com'
   s.homepage    = 'http://www.nodealchemy.com'
