@@ -47,7 +47,7 @@ class Proxy < Sinatra::Base
     node = params[:node]
     parent_resource = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1/node/' + node, id, key)
     begin
-      node_modules = JSON.parse(parent_resource['modules'].get).collect { |m| NodeModule.new(m) }
+      node_modules = JSON.parse(parent_resource['modules'].get).map { |m| NodeModule.new(m) }
     rescue => e
       logger.error "Exception: #{e.message}"
     end

@@ -9,7 +9,6 @@ require 'json'
 require 'restclient'
 require 'sidekiq'
 require 'sidekiq-encryptor'
-require 'sidekiq-unique-jobs'
 require 'powernode'
 require 'powernode/models'
 require 'manager'
@@ -44,7 +43,7 @@ class Poller
   def poll
     begin
       logger.info 'Retrieving list of nodes from parent.'
-      nodes = JSON.parse(@parent['nodes'].get).collect { |n| Node.new(n) }
+      nodes = JSON.parse(@parent['nodes'].get).map { |n| Node.new(n) }
     rescue => e
       logger.error "Exception: #{e.message}"
     end
