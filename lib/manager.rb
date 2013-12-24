@@ -183,7 +183,7 @@ class Manager
 
   def do_instance_public_ip_associate(node_instance = @node_instance)
     if node_instance
-      logger.info "#{@stamp} Associating floating IP for instance #{node_instance.id}."
+      logger.info "#{@stamp} Associating floating IP for instance #{node_instance.name}."
       begin
         cloud_instance = @cloud.servers.get(node_instance.name)
       rescue => e
