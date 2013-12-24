@@ -16,7 +16,7 @@ require 'redis/objects'
 require 'restclient'
 require 'sidekiq'
 require 'sidekiq-encryptor'
-require 'sidekiq-unique-jobs'
+require 'sidekiq-middleware'
 require 'tmpdir'
 require 'powernode'
 require 'powernode/models'
@@ -35,10 +35,10 @@ class Store
     end
   end
 
-  sidekiq_options queue: PowerNode.config(:store_queue),
-                  retry: PowerNode.config(:store_job_retries),
-                  unique: true,
-                  unique_job_expiration: PowerNode.config(:store_job_expiration)
+  sidekiq_options({ queue: PowerNode.config(:store_queue),
+                    retry: PowerNode.config(:store_job_retries),
+                    unique: :all,
+                    expiration: PowerNode.config(:store_job_expiration) })
 
   def perform(message)
     params = ActiveSupport::JSON.decode(message)
@@ -57,10 +57,10 @@ class Store
   protected
 
   def do_transfer
-    module_file_name = File.join(PowerNode.config(:module_path)}, @node_module.uuid_partition, @node_module.data_file_name)
+    module_file_name = File.join(PowerNode.config(:module_path), @node_module.uuid_partition, @node_module.data_file_name)
     logger.info "Attempting to download #{@node_module.data_file_name}."
     begin
-      FileUtils.mkdir_p(File.join(PowerNode.config(:module_path)}, @node_module.uuid_partition))
+      FileUtils.mkdir_p(File.join(PowerNode.config(:module_path), @node_module.uuid_partition))
       FileUtils.touch(module_file_name + '.tmp')
     rescue => e
       logger.error "Exception: #{e}"
