@@ -317,7 +317,7 @@ class Manager
     end
     node_cfg_file = File.join(tmp_dir, 'node.cfg')
     begin
-      File.open(node_cfg_file, 'w') { |f| f.puts(@node.config) }
+      File.open(node_cfg_file, 'w') { |f| f.puts(node_instance.config) }
     rescue => e
       logger.error "#{@stamp} Exception: #{e.message}."
     end
