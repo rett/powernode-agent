@@ -652,7 +652,7 @@ class Manager
         instance_options[:user_data] = node_credentials
         begin
           cloud_instance = @cloud.servers.create(instance_options)
-          cloud_instance.wait_for { ready? }
+          sleep 10
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
         end
