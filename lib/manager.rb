@@ -505,7 +505,7 @@ class Manager
           FileUtils.remove_entry_secure(tmp_module, force: true)
           FileUtils.remove_entry_secure(tmp_dir, force: true)
           @notifications << Notification.new("Commit complete for module #{node_module.name}")
-          logger.info "#{@stamp} Commit complete for module #{new_node_module.id}."
+          logger.info "#{@stamp} Commit complete for module #{node_module.id}."
         else
           logger.error "#{@stamp} Commit aborted."
         end
