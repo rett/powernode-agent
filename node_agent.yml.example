@@ -1,4 +1,4 @@
 :verbose: false
 :concurrency:  5
 :queues:
-  - [manager, 10]
+  - [node_agent, 10]

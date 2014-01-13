@@ -20,9 +20,8 @@ require 'sidekiq-middleware'
 require 'tmpdir'
 require 'uuidtools'
 require 'powernode'
-require 'powernode/models'
 
-class Manager
+class NodeAgent
   include PowerNode
   include Sidekiq::Worker
 
@@ -45,14 +44,14 @@ class Manager
     end
   end
 
-  sidekiq_options({ queue: PowerNode.config(:manager_queue),
+  sidekiq_options({ queue: PowerNode.config(:node_agent_queue),
                     retry: PowerNode.config(:job_retries),
                     unique: :all,
-                    expiration: PowerNode.config(:manager_job_expiration) })
+                    expiration: PowerNode.config(:node_agent_job_expiration) })
 
   def perform(message)
     operation = JSON.parse(message, symbolize_names: true)
-    @parent_resource = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1',
+    @parent_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1',
                                                 PowerNode.config(:id),
                                                 PowerNode.config(:key))
     begin
@@ -263,35 +262,32 @@ class Manager
   end
 
   def do_create_iso(node_instance = @node_instance)
-    boot_dir = File.join(PowerNode.config(:init_path), 'syslinux')
+    init_sync
+    init_dir = PowerNode.config(:init_dir)
     logger.info "#{@stamp} Creating ISO for node #{@node.id}."
     begin
-      FileUtils.mkdir_p(boot_dir) unless Dir.exist?(boot_dir)
+      FileUtils.mkdir_p(init_dir) unless Dir.exist?(init_dir)
     rescue => e
       logger.error "#{@stamp} Exception: #{e.message}."
     end
-    kernel_file_name = "#{@node.node_platform.name}.kernel"
-    kernel_file = File.join(boot_dir, kernel_file_name)
-    ramdisk_file_name = "#{@node.node_platform.name}.init"
-    ramdisk_file = File.join(boot_dir, ramdisk_file_name)
-    unless File.exists?(kernel_file) && Digest::SHA2.new(PowerNode.config(:checksum_bitlength)).hexdigest(File.binread(kernel_file)) == @node.node_platform.kernel_checksum
-      logger.info "#{@stamp} Downloading kernel for platform #{@node.node_platform.id}."
-      begin
-        File.open(kernel_file, 'w') { |f| f.write(@parent_resource["node/#{@node.id}/platform_kernel.html"].get) }
-      rescue => e
-        logger.error "#{@stamp} Exception: #{e.message}."
-      end
+    begin
+      tmp_dir = Dir.mktmpdir
+      FileUtils.mkdir_p(File.join(tmp_dir, 'syslinux'))
+    rescue => e
+      logger.error "#{@stamp} Exception: #{e.message}."
     end
-    unless File.exists?(ramdisk_file) && Digest::SHA2.new(PowerNode.config(:checksum_bitlength)).hexdigest(File.binread(ramdisk_file)) == @node.node_platform.ramdisk_checksum
-      logger.info "#{@stamp} Downloading ramdisk for platform #{@node.node_platform.id}."
-      begin
-        File.open(ramdisk_file, 'w') { |f| f.write(@parent_resource["node/#{@node.id}/platform_ramdisk.html"].get) }
-      rescue => e
-        logger.error "#{@stamp} Exception: #{e.message}."
-      end
+    begin
+      FileUtils.cp(File.join(init_dir, "#{@node.node_architecture.id}.isolinux"), File.join(tmp_dir, 'isolinux'))
+      FileUtils.cp(File.join(init_dir, "#{@node.node_architecture.id}.kernel"),   File.join(tmp_dir, 'kernel'))
+      FileUtils.cp(File.join(init_dir, "#{@node.node_architecture.id}.ramdisk"),  File.join(tmp_dir, 'ramdisk'))
+    rescue => e
+      logger.error "#{@stamp} Exception: #{e.message}."
     end
-    tmp_dir = Dir.mktmpdir
-    FileUtils.mkdir_p(File.join(tmp_dir, @node.store_dir))
+    begin
+      FileUtils.mkdir_p(File.join(tmp_dir, @node.store_dir))
+    rescue => e
+      logger.error "#{@stamp} Exception: #{e.message}."
+    end
     begin
       node_modules = JSON.parse(@parent_resource["node/#{@node.id}/modules.json?provisional=true"].get).map { |m| NodeModule.new(m) }
     rescue => e
@@ -302,14 +298,20 @@ class Manager
         module_file_name = "#{node_module.id}-#{node_module.data_file_version}.#{@node.module_extension}"
         module_file = File.join(tmp_dir, @node.store_dir, module_file_name)
         begin
-          File.open(module_file, 'w') { |f| f << @parent_resource["node/#{@node.id}/module/#{node_module.id}.html"].get }
+          File.open(module_file, File::RDWR|File::CREAT, 0644) do |f|
+            f.flock(File::LOCK_EX)
+            f << @parent_resource["node/#{@node.id}/module/#{node_module.id}.html"].get
+          end
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
         end
         module_info_file_name = "#{node_module.id}-#{node_module.data_file_version}.#{@node.module_info_extension}"
         module_info = File.join(tmp_dir, @node.store_dir, module_info_file_name)
         begin
-          File.open(module_info, 'w') { |f| f << @parent_resource["node/#{@node.id}/module/#{node_module.id}.text"].get }
+          File.open(module_info, File::RDWR|File::CREAT, 0644) do |f|
+            f.flock(File::LOCK_EX)
+            f << @parent_resource["node/#{@node.id}/module/#{node_module.id}.text"].get
+          end
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
         end
@@ -317,61 +319,54 @@ class Manager
     end
     node_cfg_file = File.join(tmp_dir, 'node.cfg')
     begin
-      File.open(node_cfg_file, 'w') { |f| f.puts(node_instance.config) }
+      File.open(node_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
+        f.flock(File::LOCK_EX)
+        f.puts(node_instance.config)
+      end
     rescue => e
       logger.error "#{@stamp} Exception: #{e.message}."
     end
     volume_cfg_file = File.join(tmp_dir, 'volume.cfg')
     begin
-      File.open(volume_cfg_file, 'w') { |f| f.puts("STORE=#{@node.store_dir}") }
-    rescue => e
-      logger.error "#{@stamp} Exception: #{e.message}."
-    end
-    begin
-      FileUtils.mkdir_p(File.join(tmp_dir, 'syslinux'))
-      FileUtils.cp(kernel_file, File.join(tmp_dir, 'syslinux'))
-      FileUtils.cp(ramdisk_file, File.join(tmp_dir, 'syslinux'))
-      FileUtils.cp(File.join(boot_dir, 'isolinux-debug.bin'), File.join(tmp_dir, 'syslinux', 'isolinux.bin'))
-    rescue => e
-      logger.error "#{@stamp} Exception: #{e.message}."
-    end
-    syslinux_template_file = File.join(PowerNode.config(:init_path), 'syslinux', 'syslinux.cfg')
-    syslinux_cfg_file = File.join(tmp_dir, 'syslinux', 'syslinux.cfg')
-    if File.exist?(syslinux_template_file)
-      FileUtils.cp(syslinux_template_file, syslinux_cfg_file)
-    else
-      File.write(syslinux_cfg_file, '')
-    end
-    begin
-      File.open(syslinux_cfg_file, 'a') do |f|
-        f << "LABEL alchemy\n" +
-             "LINUX /syslinux/#{@node.node_platform.name}.kernel\n" +
-             "INITRD /syslinux/#{@node.node_platform.name}.init\n" +
-             "APPEND HOSTNAME=#{node_instance.name} " +
-             "PARENT=#{PowerNode.config(:proxy_url).nil? ? PowerNode.config(:parent_url) : PowerNode.config(:proxy_url)} " +
-             "ID=#{node_instance ? node_instance.id : @node.id} " +
-             "KEY=#{node_instance.manager_key.blank? ? @node.manager_key : node_instance.manager_key } "
+      File.open(volume_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
+        f.flock(File::LOCK_EX)
+        f.puts("STORE=#{@node.store_dir}")
       end
     rescue => e
       logger.error "#{@stamp} Exception: #{e.message}."
     end
-    if node_instance.private_ip_static
-      File.open(syslinux_cfg_file, 'a') do |f|
-        f << "ip=#{node_instance.private_ip_address}:" +
-             ":" +
-             "#{node_instance.private_ip_gateway}:" +
-             "#{node_instance.private_ip_netmask}:" +
-             "#{node_instance.name}:" +
-             "#{node_instance.private_ip_device}:" +
-             "off " +
-             "DNS_PRIMARY=#{node_instance.private_ip_primary_dns} " +
-             "DNS_SECONDARY=#{node_instance.private_ip_secondary_dns} " +
-             "DNS_DOMAIN=#{node_instance.private_ip_domain}\n"
+    FileUtils.mkdir_p(File.join(tmp_dir, 'syslinux'))
+    syslinux_cfg_file = File.join(tmp_dir, 'syslinux', 'syslinux.cfg')
+    begin
+      File.open(syslinux_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
+        f.flock(File::LOCK_EX)
+        f << "DEFAULT alchemy\n" +
+             "LABEL alchemy\n" +
+             "LINUX /kernel\n" +
+             "INITRD /ramdisk\n" +
+             "APPEND HOSTNAME=#{node_instance.name} " +
+             "PARENT=#{PowerNode.config(:node_proxy_url).nil? ? PowerNode.config(:node_server_url) : PowerNode.config(:node_proxy_url)} " +
+             "ID=#{node_instance ? node_instance.id : @node.id} " +
+             "KEY=#{node_instance.agent_key.blank? ? @node.agent_key : node_instance.agent_key } "
+        if node_instance.private_ip_static
+          f << "ip=#{node_instance.private_ip_address}:" +
+               ":" +
+               "#{node_instance.private_ip_gateway}:" +
+               "#{node_instance.private_ip_netmask}:" +
+               "#{node_instance.name}:" +
+               "#{node_instance.private_ip_device}:" +
+               "off " +
+               "DNS_PRIMARY=#{node_instance.private_ip_primary_dns} " +
+               "DNS_SECONDARY=#{node_instance.private_ip_secondary_dns} " +
+               "DNS_DOMAIN=#{node_instance.private_ip_domain}\n"
+        else
+          f << "\n"
+        end
       end
     end
     node_iso_file = Tempfile.new("#{@node.id}.iso-")
     FileUtils.chmod(0644, node_iso_file)
-    system("sudo mkisofs -o #{node_iso_file.path} -b syslinux/isolinux.bin -c syslinux/boot.cat -R -J -l -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}")
+    system("sudo mkisofs -o #{node_iso_file.path} -b isolinux -c syslinux/boot.cat -R -J -l -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir} > /dev/null 2>&1")
     if node_iso_file.size > 0
       begin
         @node = Node.new(JSON.parse(@parent_resource["node/#{@node.id}/iso.json"].post(
@@ -460,7 +455,8 @@ class Manager
       FileUtils.chmod(0755, tmp_dir)
       begin
         tmp_spec = Tempfile.new("spec-#{@node.id}-#{node_module.id}")
-        File.open(tmp_spec, 'w') do |f|
+        File.open(tmp_spec, File::RDWR|File::CREAT, 0644) do |f|
+          f.flock(File::LOCK_EX)
           node_module.effective_spec.each do |l|
             f.write(Base64.decode64(l) + "\n")
           end
@@ -626,16 +622,39 @@ class Manager
         node_attributes = { ssh_key: PowerNode.encrypt(key.private_key), ssh_key_fingerprint: key.fingerprint }
         logger.info "#{@stamp} Uploading new keypair #{keypair_name} to parent."
         if @parent_resource["node/#{@node.id}"].post(node: node_attributes)
-          if (ssh_key_path = PowerNode.config(:ssh_key_path))
-            FileUtils.mkdir_p(ssh_key_path)
+          if (ssh_key_dir = PowerNode.config(:ssh_key_dir))
+            FileUtils.mkdir_p(ssh_key_dir)
             FileUtils.touch(@node.ssh_key_file)
             FileUtils.chmod(0600, @node.ssh_key_file)
-            File.open(@node.ssh_key_file, 'w') { |f| f.write(key.private_key) }
+            File.open(@node.ssh_key_file, File::RDWR|File::CREAT, 0644) do |f|
+              f.flock(File::LOCK_EX)
+              f.write(key.private_key)
+            end
           end
         end
       end
     end
     key
+  end
+
+  def init_sync
+    init_dir = PowerNode.config(:init_dir)
+    FileUtils.mkdir_p(init_dir)
+    %w[kernel ramdisk extlinux isolinux pxelinux syslinux].each do |component|
+      init_file = File.join(init_dir, "#{@node.node_architecture.id}.#{component}")
+      component_checksum = @node.node_architecture.send("#{component}_checksum")
+      if component_checksum.present? && (!File.exists?(init_file) || component_checksum != Digest::SHA2.new(PowerNode.config(:checksum_bitlength)).hexdigest(File.binread(init_file)))
+        logger.info "#{@stamp} Downloading #{component} for architecture #{@node.node_architecture.id}."
+        begin
+          File.open(init_file, File::RDWR|File::CREAT, 0644) do |f|
+            f.flock(File::LOCK_EX)
+            f.write(@parent_resource["node/#{@node.id}/architecture/#{component}.html"].get)
+          end
+        rescue => e
+          logger.error "#{@stamp} Exception: #{e.message}."
+        end
+      end
+    end
   end
 
   def launch_instances(count = 1)
@@ -679,24 +698,24 @@ class Manager
   def node_credentials
     <<-EOF.strip_heredoc
       ID=#{@node_instance ? @node_instance.id : @node.id}
-      KEY=#{(@node_instance && !@node_instance.manager_key.blank?) ? @node_instance.manager_key : @node.manager_key}
-      PARENT=#{PowerNode.config(:proxy_url).nil? ? PowerNode.config(:parent_url) : PowerNode.config(:proxy_url)}
+      KEY=#{(@node_instance && !@node_instance.agent_key.blank?) ? @node_instance.agent_key : @node.agent_key}
+      PARENT=#{PowerNode.config(:node_proxy_url).nil? ? PowerNode.config(:node_server_url) : PowerNode.config(:node_proxy_url)}
       INIT_SCRIPT=#{@node.node_script_name}
     EOF
   end
 
   def netboot_clean
-    pxelinux_dir = File.join(PowerNode.config(:init_path), 'pxelinux.cfg')
+    pxelinux_dir = File.join(PowerNode.config(:init_dir), 'pxelinux.cfg')
     Dir.glob(File.join(pxelinux_dir, '??-??-??-??-??-??')) do |f|
       FileUtils.rm(f) if File.mtime(f) < Time.now - PowerNode.config(:init_expire)
     end
   end
 
   def netboot_sync(node_instance = @node_instance)
-    boot_dir = File.join(PowerNode.config(:init_path), 'syslinux')
-    pxelinux_dir = File.join(boot_dir, 'pxelinux.cfg')
+    init_sync
+    init_dir = PowerNode.config(:init_dir)
+    pxelinux_dir = File.join(init_dir, 'pxelinux.cfg')
     FileUtils.mkdir_p(pxelinux_dir) unless Dir.exist?(pxelinux_dir)
-    FileUtils.mkdir_p(boot_dir) unless Dir.exist?(boot_dir)
     if node_instance.private_netboot_enabled && !node_instance.private_mac_address.empty?
       logger.info "#{@stamp} Synchronizing netboot config for instance #{node_instance.id}."
       netboot_cfg_file = File.join(pxelinux_dir, node_instance.private_mac_address)
@@ -706,42 +725,20 @@ class Manager
       if File.exist?(netboot_cfg_file) && (File.mtime(netboot_cfg_file) < Time.now - PowerNode.config(:init_expire) || node_instance.updated_at == updated_at)
         FileUtils.touch(netboot_cfg_file)
       else
-        kernel_file_name = "#{@node.node_platform.name}.kernel"
-        kernel_file = File.join(boot_dir, kernel_file_name)
-        ramdisk_file_name = "#{@node.node_platform.name}.init"
-        ramdisk_file = File.join(boot_dir, ramdisk_file_name)
-        unless File.exists?(kernel_file) && Digest::SHA2.new(PowerNode.config(:checksum_bitlength)).hexdigest(File.binread(kernel_file)) == @node.node_platform.kernel_checksum
-          logger.info "#{@stamp} Downloading kernel for platform #{@node.node_platform.id}."
-          begin
-            File.open(kernel_file, 'w') { |f| f.write(@parent_resource["node/#{@node.id}/platform_kernel.html"].get) }
-          rescue => e
-            logger.error "#{@stamp} Exception: #{e.message}."
-          end
-        end
-        unless File.exists?(ramdisk_file) && Digest::SHA2.new(PowerNode.config(:checksum_bitlength)).hexdigest(File.binread(ramdisk_file)) == @node.node_platform.ramdisk_checksum
-          logger.info "#{@stamp} Downloading ramdisk for platform #{@node.node_platform.id}."
-          begin
-            File.open(ramdisk_file, 'w') { |f| f.write(@parent_resource["node/#{@node.id}/platform_ramdisk.html"].get) }
-          rescue => e
-            logger.error "#{@stamp} Exception: #{e.message}."
-          end
-        end
-        netboot_template_file = File.join(PowerNode.config(:init_path), 'syslinux.cfg')
-        if File.exist?(netboot_template_file)
-          FileUtils.cp(netboot_template_file, netboot_cfg_file)
-        else
-          File.write(netboot_cfg_file, '')
-        end
+        kernel_file_name = "#{@node.node_architecture.id}.kernel"
+        ramdisk_file_name = "#{@node.node_architecture.id}.ramdisk"
         begin
-          File.open(netboot_cfg_file, 'a') do |f|
+          File.open(netboot_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
+            f.flock(File::LOCK_EX)
             f << "# Updated: #{node_instance.updated_at}\n" +
+                 "DEFAULT alchemy\n" +
                  "LABEL alchemy\n" +
-                 "LINUX /syslinux/#{kernel_file_name}\n" +
-                 "INITRD /syslinux/#{ramdisk_file_name}\n" +
+                 "LINUX /#{kernel_file_name}\n" +
+                 "INITRD /#{ramdisk_file_name}\n" +
                  "APPEND HOSTNAME=#{node_instance.name} " +
-                 "PARENT=#{PowerNode.config(:proxy_url).nil? ? PowerNode.config(:parent_url) : PowerNode.config(:proxy_url)} " +
+                 "PARENT=#{PowerNode.config(:node_proxy_url).nil? ? PowerNode.config(:node_server_url) : PowerNode.config(:node_proxy_url)} " +
                  "ID=#{node_instance ? node_instance.id : @node.id} " +
-                 "KEY=#{node_instance.manager_key.blank? ? @node.manager_key : node_instance.manager_key } "
+                 "KEY=#{node_instance.agent_key.blank? ? @node.agent_key : node_instance.agent_key } "
             if node_instance.private_ip_static
               f << "ip=" +
                    "#{node_instance.private_ip_address}:" +

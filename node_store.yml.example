@@ -1,4 +1,4 @@
 :verbose: false
 :concurrency:  3
 :queues:
-  - [store, 10]
+  - [node_store, 10]

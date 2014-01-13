@@ -19,9 +19,8 @@ require 'sidekiq-encryptor'
 require 'sidekiq-middleware'
 require 'tmpdir'
 require 'powernode'
-require 'powernode/models'
 
-class Store
+class NodeStore
   include PowerNode
   include Sidekiq::Worker
 
@@ -41,26 +40,25 @@ class Store
                     expiration: PowerNode.config(:store_job_expiration) })
 
   def perform(message)
-    params = ActiveSupport::JSON.decode(message)
-    @node = Node.new(params['node'])
-    @node_module = NodeModule.new(params['node_module'])
-    @operation = params['operation']
+    @params = ActiveSupport::JSON.decode(message)
+    @operation = @params['operation']
     begin
-      @node_resource = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1/node',
+      @node_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1/node',
                                                 PowerNode.config(:id),
                                                 PowerNode.config(:key))
-      logger.info "Performing #{@operation} on module #{@node_module.id}."
       send("do_#{@operation}") if respond_to?("do_#{@operation}")
     end
   end
 
   protected
 
-  def do_transfer
-    module_file_name = File.join(PowerNode.config(:module_path), @node_module.uuid_partition, @node_module.data_file_name)
+  def do_transfer_module
+    @node = Node.new(@params['node'])
+    @node_module = NodeModule.new(@params['node_module'])
+    module_file_name = File.join(PowerNode.config(:module_dir), @node_module.uuid_partition, @node_module.data_file_name)
     logger.info "Attempting to download #{@node_module.data_file_name}."
     begin
-      FileUtils.mkdir_p(File.join(PowerNode.config(:module_path), @node_module.uuid_partition))
+      FileUtils.mkdir_p(File.join(PowerNode.config(:module_dir), @node_module.uuid_partition))
       FileUtils.touch(module_file_name + '.tmp')
     rescue => e
       logger.error "Exception: #{e}"

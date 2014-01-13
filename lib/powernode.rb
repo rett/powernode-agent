@@ -76,3 +76,5 @@ module PowerNode
     encrypted_data
   end
 end
+
+require 'powernode/models'
