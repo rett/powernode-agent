@@ -408,7 +408,7 @@ class NodeAgent
           end
           logger.info "#{@stamp} Installing packages for module #{node_module.id}."
           begin
-            session.exec!("sudo apt-get -qy install #{packages.join(' ')}")
+            session.exec!("sudo RUNLEVEL=1 apt-get -qy install #{packages.join(' ')}")
           rescue => e
             logger.error "#{@stamp} Exception: #{e.message}."
           end
