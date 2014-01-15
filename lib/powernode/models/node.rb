@@ -2,7 +2,8 @@ class Node
   include PowerNode::ModelExtensions
 
   def build_objects
-    self.node_instance_type  = NodeInstanceType.new(node_instance_type) if self.respond_to?(:node_instance_type)
+    self.node_architecture = NodeArchitecture.new(node_architecture) if self.respond_to?(:node_architecture)
+    self.node_instance_type = NodeInstanceType.new(node_instance_type) if self.respond_to?(:node_instance_type)
     self.node_instances = node_instances.map { |i| NodeInstance.new(i) } if self.respond_to?(:node_instances)
     self.node_modules = node_modules.map { |m| NodeModule.new(m) } if self.respond_to?(:node_modules)
     self.node_platform = NodePlatform.new(node_platform) if self.respond_to?(:node_platform)
@@ -32,6 +33,6 @@ class Node
   end
 
   def ssh_key_file
-    File.join(PowerNode.config(:ssh_key_path), "#{id}.pem")
+    File.join(PowerNode.config(:ssh_key_dir), "#{id}.pem")
   end
 end

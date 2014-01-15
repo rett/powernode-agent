@@ -6,7 +6,7 @@ LOGFILE="$(dirname $0)/../log/${NAME}.log"
 WORKER="$(dirname $0)/../lib/${NAME}.rb"
 PIDFILE="$(dirname $0)/../tmp/pids/${NAME}.pid"
 
-manager_requirements="mkisofs mksquashfs rsync ruby sudo"
+node_agent_requirements="mkisofs mksquashfs rsync ruby sudo"
 store_requirements="ruby"
 
 check_requirements()

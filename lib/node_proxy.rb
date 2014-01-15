@@ -17,10 +17,9 @@ require 'sidekiq-encryptor'
 require 'sinatra/base'
 require 'sinatra/multi_route'
 require 'sinatra/synchrony'
-require 'store'
-require 'thin'
 require 'powernode'
-require 'powernode/models'
+require 'node_store'
+require 'thin'
 
 Sidekiq.configure_client do |config|
   config.redis = { namespace: PowerNode.config(:redis_namespace), url: PowerNode.config(:redis_server) }
@@ -31,7 +30,7 @@ end
 
 Redis.current = Sidekiq::RedisConnection
 
-class Proxy < Sinatra::Base
+class NodeProxy < Sinatra::Base
   include PowerNode
   register Sinatra::Synchrony
   register Sinatra::MultiRoute
@@ -45,7 +44,7 @@ class Proxy < Sinatra::Base
     auth = Rack::Auth::Basic::Request.new(@env)
     id, key = auth.credentials
     node = params[:node]
-    parent_resource = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1/node/' + node, id, key)
+    parent_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1/node/' + node, id, key)
     begin
       node_modules = JSON.parse(parent_resource['modules'].get).map { |m| NodeModule.new(m) }
     rescue => e
@@ -54,9 +53,9 @@ class Proxy < Sinatra::Base
     if node_modules
       node_modules.each do |node_module|
         if node_module.data_file_name
-          module_file_name = File.join(PowerNode.config(:module_path), node_module.uuid_partition, node_module.data_file_name)
+          module_file_name = File.join(PowerNode.config(:module_dir), node_module.uuid_partition, node_module.data_file_name)
           unless File.exist?(module_file_name) && node_module.data_checksum == Digest::SHA2.new(PowerNode.config(:checksum_bitlength) || 256).hexdigest(File.binread(module_file_name))
-            enqueue_message(node, node_module, 'transfer')
+            enqueue_message({ node: node, node_module: node_module, operation: 'transfer_module' })
             node_module.status = 'WAIT'
           end
         end
@@ -66,14 +65,7 @@ class Proxy < Sinatra::Base
           csv << [node_module.status,
                   node_module.id,
                   node_module.data_file_version,
-                  node_module.data_checksum,
-                  node_module.name,
-                  node_module.init_start,
-                  node_module.init_stop,
-                  node_module.init_restart,
-                  node_module.effective_priority,
-                  node_module.reboot_required,
-                  node_module.copy_path] if node_module.data_checksum
+                  node_module.data_checksum] if node_module.data_checksum
         end
       end
       content_type('text/csv')
@@ -88,20 +80,19 @@ class Proxy < Sinatra::Base
     id, key = auth.credentials
     node = params[:node]
     node_module_id = params[:node_module]
-    parent_resource = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1/node/' + node, id, key)
+    parent_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1/node/' + node, id, key)
     begin
       node_module = NodeModule.new(JSON.parse(parent_resource["module/#{node_module_id}"].get))
     rescue => e
       logger.error "Exception: #{e.message}"
     end
     if node_module
-      module_file_name = File.join(PowerNode.config(:module_path), node_module.uuid_partition, node_module.data_file_name)
+      module_file_name = File.join(PowerNode.config(:module_dir), node_module.uuid_partition, node_module.data_file_name)
       if File.exist?(module_file_name) && node_module.data_checksum == Digest::SHA2.new(PowerNode.config(:checksum_bitlength) || 256).hexdigest(File.binread(module_file_name))
         logger.info "Sending module: #{node_module.id}, #{module_file_name}"
         send_file(module_file_name)
       else
-        enqueue_message(node, node_module, 'transfer')
-        logger.info "Sending status 202"
+        enqueue_message({ node: node, node_module: node_module, operation: 'transfer_module' })
         status 202
       end
     end
@@ -109,16 +100,16 @@ class Proxy < Sinatra::Base
 
   route :get, :post, '/api/v1/*' do |path|
     if PowerNode.config(:proxy_redirect) == 'true'
-      logger.info "Redirecting request to #{PowerNode.config(:parent_url)}/api/v1/#{path}."
+      logger.info "Redirecting request to #{PowerNode.config(:node_server_url)}/api/v1/#{path}."
       begin
-        redirect PowerNode.config(:parent_url) + "/api/v1/#{path}"
+        redirect PowerNode.config(:node_server_url) + "/api/v1/#{path}"
       rescue => e
         logger.error "Exception: #{e.message}"
       end
     else
       auth = Rack::Auth::Basic::Request.new(@env)
       node, key = auth.credentials
-      parent_request = RestClient::Resource.new(PowerNode.config(:parent_url) + '/api/v1/' + params[:splat].join, node, key)
+      parent_request = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1/' + params[:splat].join, node, key)
       begin
         logger.info "Forwarding #{request.env['REQUEST_METHOD']} #{request.env['REQUEST_PATH']}"
         method = request.env["REQUEST_METHOD"].gsub(/\W/, '').downcase.to_sym
@@ -129,21 +120,20 @@ class Proxy < Sinatra::Base
 
   private
 
-  def enqueue_message(node, node_module, operation)
-    message = ActiveSupport::JSON.encode({ node: node, node_module: node_module, operation: operation })
-    logger.info "Queued #{operation} for module #{node_module.id}." if Store.perform_async(message)
+  def enqueue_message(message)
+    logger.info "Queued #{operation} for module #{node_module.id}." if Store.perform_async(message.to_json)
   end
 
   def logger
     if @logger.nil?
-      @logger = Logger.new(File.join(PowerNode.config(:log_path), PowerNode.config(:proxy_logfile)), PowerNode.config(:log_cycle))
-      @logger.level = Logger.const_get(PowerNode.config(:proxy_loglevel).upcase)
+      @logger = Logger.new(File.join(PowerNode.config(:log_dir), PowerNode.config(:node_proxy_logfile)), PowerNode.config(:log_cycle))
+      @logger.level = Logger.const_get(PowerNode.config(:node_proxy_loglevel).upcase)
     end
     @logger
   end
 
   def run!
-    rack_handler_config = { Host: PowerNode.config(:proxy_ip), Port: PowerNode.config(:proxy_port) }
+    rack_handler_config = { Host: PowerNode.config(:node_proxy_ip), Port: PowerNode.config(:node_proxy_port) }
     ssl_options = {
         cert_chain_file: File.join(PowerNode.config(:ssl_chain_file)),
         private_key_file: File.join(PowerNode.config(:ssl_key_file))
@@ -157,4 +147,4 @@ class Proxy < Sinatra::Base
   end
 end
 
-Proxy.run!
+NodeProxy.run!
