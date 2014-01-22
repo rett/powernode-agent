@@ -192,6 +192,7 @@ class NodeAgent
         address = @cloud.addresses.find { |ip| ip.server_id == nil }
         address ||= @cloud.addresses.create
         address.server = cloud_instance if address
+        @notifications << Notification.new("Associated IP #{address.public_ip} for instance #{node_instance.name}.")
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
@@ -210,6 +211,7 @@ class NodeAgent
           logger.info "#{@stamp} Disassociating floating IP for instance #{node_instance.name}."
           address.server = nil
           address.destroy
+          @notifications << Notification.new("Disassociated IP #{address.public_ip} for instance #{node_instance.name}.")
         end
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
