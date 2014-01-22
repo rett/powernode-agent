@@ -189,7 +189,7 @@ class NodeAgent
         logger.error "#{@stamp} Exception: #{e.message}."
       end
       begin
-        address = @cloud.addresses.find { |ip| ip.server_id =~ /None/ }
+        address = @cloud.addresses.find { |ip| ip.server_id == nil }
         address ||= @cloud.addresses.create
         address.server = cloud_instance if address
       rescue => e
@@ -766,6 +766,7 @@ class NodeAgent
     logger.info "#{@stamp} Destroying instance: #{node_instance.name}."
     begin
       @cloud.servers.destroy(node_instance.name)
+      do_instance_public_ip_disassociate(node_instance)
       deregister_instance(node_instance)
     rescue => e
       logger.error "#{@stamp} Exception: #{e.message}."
