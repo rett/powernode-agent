@@ -536,13 +536,13 @@ class NodeAgent
         Attached is the encrypted SSH key for node #{@node.name}.
 
         You must decrypt the ssh key with the following command:
-        $ openssl #{PowerNode.config(:encryption_cipher)} -base64 -d -in #{@node.name + '.pem.sha'} -out #{@node.name + '.pem'} -iv #{iv.unpack('H*')[0]} -K [encryption key]
+        $ openssl #{PowerNode.config(:encryption_cipher)} -base64 -d -in #{@node.name}.txt -out #{@node.name}.pem -iv #{iv.unpack('H*')[0]} -K [encryption key]
 
         Change the file permissions:
-        $ chmod 600 #{@node.name + '.pem'}
+        $ chmod 600 #{@node.name}.pem
 
         SSH in to an instance by specifying the private key:
-        $ ssh -i #{@node.name + '.pem'} #{@node.admin_user}@[ip address]
+        $ ssh -i #{@node.name}.pem #{@node.admin_user}@[ip address]
 
         Thanks,
         Node Alchemy
@@ -551,10 +551,7 @@ class NodeAgent
         Pony.mail(to: recipient,
                   subject: "SSH key for #{@node.name}",
                   body: body,
-                  attachments: { "#{@node.name}.pem.sha" => encrypted_ssh_key },
-                  headers: { 'Content-Type' => 'multipart/mixed',
-                             'Content-Transfer-Encoding' => 'base64',
-                             'Content-Disposition' => 'attachment' })
+                  attachments: { "#{@node.name}.txt" => encrypted_ssh_key })
         @notifications << Notification.new("SSH key delivered for #{@node.name}")
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
