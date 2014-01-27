@@ -7,8 +7,9 @@ class Node
     self.node_instances = node_instances.map { |i| NodeInstance.new(i) } if self.respond_to?(:node_instances)
     self.node_modules = node_modules.map { |m| NodeModule.new(m) } if self.respond_to?(:node_modules)
     self.node_platform = NodePlatform.new(node_platform) if self.respond_to?(:node_platform)
-    self.node_provider = NodeProvider.new(node_provider) if self.respond_to?(:node_provider)
     self.node_template = NodeTemplate.new(node_template) if self.respond_to?(:node_template)
+    self.provider = Provider.new(provider) if self.respond_to?(:provider)
+    self.provider_endpoint = ProviderEndpoint.new(provider_endpoint) if self.respond_to?(:provider_endpoint)
     self.operations = operations.map { |o| Operation.new(o) } if self.respond_to?(:operations)
     if self.respond_to?(:puppet_modules)
       self.puppet_modules = puppet_modules.map { |m| PuppetModule.new(m) }

@@ -50,6 +50,7 @@ class NodeAgent
                     expiration: PowerNode.config(:node_agent_job_expiration) })
 
   def perform(message)
+    @notifications = []
     operation = JSON.parse(message, symbolize_names: true)
     @parent_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1',
                                                 PowerNode.config(:id),
@@ -60,11 +61,7 @@ class NodeAgent
       logger.error "#{@stamp} Exception: #{e.message}."
     end
     if @node
-      compute = { provider: 'AWS',
-                  endpoint: @node.node_provider.aws_endpoint,
-                  aws_access_key_id: @node.node_provider.aws_access_key_id,
-                  aws_secret_access_key: @node.node_provider.aws_secret_access_key }
-      @cloud = Fog::Compute.new(compute)
+      @cloud = configure_endpoint(@node)
       @stamp = "[#{operation[:command]}:#{@node.id}]"
       if @node.dirty?
         dirty_attributes = PowerNode.config(:encrypted_attributes).map { |a| @node.respond_to?("#{a}_dirty") ? { a.to_sym => @node.send('raw_' + a) } : nil }.compact
@@ -74,10 +71,10 @@ class NodeAgent
           logger.error "#{@stamp} Exception: #{e.message}."
         end
       end
-      if @node.node_provider.dirty?
-        dirty_attributes = PowerNode.config(:encrypted_attributes).map { |a| @node.node_provider.respond_to?(a) ? { a.to_sym => @node.node_provider.send('raw_' + a) } : nil }.compact
+      if @node.provider.dirty?
+        dirty_attributes = PowerNode.config(:encrypted_attributes).map { |a| @node.provider.respond_to?(a) ? { a.to_sym => @node.provider.send('raw_' + a) } : nil }.compact
         begin
-          @parent_resource["node/#{@node.id}/provider/#{@node.node_provider.id}.json"].post(node_provider: dirty_attributes)
+          @parent_resource["node/#{@node.id}/provider/#{@node.provider.id}.json"].post(provider: dirty_attributes)
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
         end
@@ -92,7 +89,7 @@ class NodeAgent
           end
         end
       end
-      @node = Node.new(JSON.parse(@parent_resource["node/#{operation[:node_id]}.json"].get)) if @node.dirty? || @node.node_provider.dirty?
+      @node = Node.new(JSON.parse(@parent_resource["node/#{operation[:node_id]}.json"].get)) if @node.dirty? || @node.provider.dirty?
       send("do_#{operation[:command]}") if operation[:command] && respond_to?("do_#{operation[:command]}")
     end
   end
@@ -100,7 +97,6 @@ class NodeAgent
   def do_node_operations
     if @node.enabled && @node.operations.is_a?(Array) && @node.operations.count > 0
       @node.operations.each do |operation|
-        @notifications = []
         @operation = operation
         @node_instance = @node.node_instances.select { |i| i.id == @operation.node_instance_id }.first if @operation.try(:node_instance_id)
         @node_module_id = @operation.node_module_id if @operation.try(:node_module_id)
@@ -189,9 +185,10 @@ class NodeAgent
         logger.error "#{@stamp} Exception: #{e.message}."
       end
       begin
-        address = @cloud.addresses.find { |ip| ip.server_id =~ /None/ }
+        address = @cloud.addresses.find { |ip| ip.server_id == nil }
         address ||= @cloud.addresses.create
         address.server = cloud_instance if address
+        @notifications << Notification.new("Associated IP #{address.public_ip} for instance #{node_instance.name}.")
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
@@ -210,6 +207,7 @@ class NodeAgent
           logger.info "#{@stamp} Disassociating floating IP for instance #{node_instance.name}."
           address.server = nil
           address.destroy
+          @notifications << Notification.new("Disassociated IP #{address.public_ip} for instance #{node_instance.name}.")
         end
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
@@ -534,13 +532,13 @@ class NodeAgent
         Attached is the encrypted SSH key for node #{@node.name}.
 
         You must decrypt the ssh key with the following command:
-        $ openssl #{PowerNode.config(:encryption_cipher)} -base64 -d -in #{@node.name + '.pem.sha'} -out #{@node.name + '.pem'} -iv #{iv.unpack('H*')[0]} -K [encryption key]
+        $ openssl #{PowerNode.config(:encryption_cipher)} -base64 -d -in #{@node.name}.txt -out #{@node.name}.pem -iv #{iv.unpack('H*')[0]} -K [encryption key]
 
         Change the file permissions:
-        $ chmod 600 #{@node.name + '.pem'}
+        $ chmod 600 #{@node.name}.pem
 
         SSH in to an instance by specifying the private key:
-        $ ssh -i #{@node.name + '.pem'} #{@node.admin_user}@[ip address]
+        $ ssh -i #{@node.name}.pem #{@node.admin_user}@[ip address]
 
         Thanks,
         Node Alchemy
@@ -549,10 +547,7 @@ class NodeAgent
         Pony.mail(to: recipient,
                   subject: "SSH key for #{@node.name}",
                   body: body,
-                  attachments: { "#{@node.name}.pem.sha" => encrypted_ssh_key },
-                  headers: { 'Content-Type' => 'multipart/mixed',
-                             'Content-Transfer-Encoding' => 'base64',
-                             'Content-Disposition' => 'attachment' })
+                  attachments: { "#{@node.name}.txt" => encrypted_ssh_key })
         @notifications << Notification.new("SSH key delivered for #{@node.name}")
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
@@ -586,6 +581,23 @@ class NodeAgent
   end
 
   private
+
+  def configure_endpoint(node = @node)
+    endpoint_type = @node.provider_endpoint.endpoint_type
+    provider = { provider: endpoint_type,
+                 endpoint: @node.provider_endpoint.endpoint_url }
+    case endpoint_type
+    when 'aws'
+      provider[:aws_access_key_id] = @node.provider.access_key
+      provider[:aws_secret_access_key] = @node.provider.secret_key
+    end
+    begin
+      endpoint = Fog::Compute.new(provider)
+    rescue => e
+      logger.error "#{@stamp} Exception: #{e.message}."
+    end
+    endpoint
+  end
 
   def deregister_instance(node_instance = @node_instance)
     logger.info "#{@stamp} Deregistering instance #{node_instance.name}."
@@ -661,12 +673,12 @@ class NodeAgent
     if (key = get_key)
       count.times do
         instance_options = {}
-        instance_options[:availability_zone] = @node.node_provider.aws_availability_zone if @node.node_provider.aws_availability_zone
-        instance_options[:image_id] = @node.node_provider.image_id if !@node.node_provider.image_id.empty?
-        instance_options[:kernel_id] = @node.node_provider.kernel_id if !@node.node_provider.kernel_id.empty?
-        instance_options[:ramdisk_id] = @node.node_provider.ramdisk_id if !@node.node_provider.ramdisk_id.empty?
+        instance_options[:availability_zone] = @node.provider_endpoint.availability_zone if @node.provider_endpoint.availability_zone
+        instance_options[:image_id] = @node.provider_endpoint.machine_image if !@node.provider_endpoint.machine_image.empty?
+        instance_options[:kernel_id] = @node.provider_endpoint.kernel_image if !@node.provider_endpoint.kernel_image.empty?
+        instance_options[:ramdisk_id] = @node.provider_endpoint.ramdisk_image if !@node.provider_endpoint.ramdisk_image.empty?
         instance_options[:flavor_id] = @node.node_instance_type.name
-        instance_options[:region] = @node.node_provider.region
+        instance_options[:region] = @node.provider_endpoint.region
         instance_options[:key_name] = key.name
         instance_options[:user_data] = node_credentials
         begin
@@ -766,6 +778,7 @@ class NodeAgent
     logger.info "#{@stamp} Destroying instance: #{node_instance.name}."
     begin
       @cloud.servers.destroy(node_instance.name)
+      do_instance_public_ip_disassociate(node_instance)
       deregister_instance(node_instance)
     rescue => e
       logger.error "#{@stamp} Exception: #{e.message}."
