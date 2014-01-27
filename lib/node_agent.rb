@@ -50,6 +50,7 @@ class NodeAgent
                     expiration: PowerNode.config(:node_agent_job_expiration) })
 
   def perform(message)
+    @notifications = []
     operation = JSON.parse(message, symbolize_names: true)
     @parent_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1',
                                                 PowerNode.config(:id),
@@ -60,11 +61,7 @@ class NodeAgent
       logger.error "#{@stamp} Exception: #{e.message}."
     end
     if @node
-      compute = { provider: 'AWS',
-                  endpoint: @node.node_provider.aws_endpoint,
-                  aws_access_key_id: @node.node_provider.aws_access_key_id,
-                  aws_secret_access_key: @node.node_provider.aws_secret_access_key }
-      @cloud = Fog::Compute.new(compute)
+      @cloud = configure_endpoint(@node)
       @stamp = "[#{operation[:command]}:#{@node.id}]"
       if @node.dirty?
         dirty_attributes = PowerNode.config(:encrypted_attributes).map { |a| @node.respond_to?("#{a}_dirty") ? { a.to_sym => @node.send('raw_' + a) } : nil }.compact
@@ -74,10 +71,10 @@ class NodeAgent
           logger.error "#{@stamp} Exception: #{e.message}."
         end
       end
-      if @node.node_provider.dirty?
-        dirty_attributes = PowerNode.config(:encrypted_attributes).map { |a| @node.node_provider.respond_to?(a) ? { a.to_sym => @node.node_provider.send('raw_' + a) } : nil }.compact
+      if @node.provider.dirty?
+        dirty_attributes = PowerNode.config(:encrypted_attributes).map { |a| @node.provider.respond_to?(a) ? { a.to_sym => @node.provider.send('raw_' + a) } : nil }.compact
         begin
-          @parent_resource["node/#{@node.id}/provider/#{@node.node_provider.id}.json"].post(node_provider: dirty_attributes)
+          @parent_resource["node/#{@node.id}/provider/#{@node.provider.id}.json"].post(provider: dirty_attributes)
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
         end
@@ -92,7 +89,7 @@ class NodeAgent
           end
         end
       end
-      @node = Node.new(JSON.parse(@parent_resource["node/#{operation[:node_id]}.json"].get)) if @node.dirty? || @node.node_provider.dirty?
+      @node = Node.new(JSON.parse(@parent_resource["node/#{operation[:node_id]}.json"].get)) if @node.dirty? || @node.provider.dirty?
       send("do_#{operation[:command]}") if operation[:command] && respond_to?("do_#{operation[:command]}")
     end
   end
@@ -100,7 +97,6 @@ class NodeAgent
   def do_node_operations
     if @node.enabled && @node.operations.is_a?(Array) && @node.operations.count > 0
       @node.operations.each do |operation|
-        @notifications = []
         @operation = operation
         @node_instance = @node.node_instances.select { |i| i.id == @operation.node_instance_id }.first if @operation.try(:node_instance_id)
         @node_module_id = @operation.node_module_id if @operation.try(:node_module_id)
@@ -586,6 +582,23 @@ class NodeAgent
 
   private
 
+  def configure_endpoint(node = @node)
+    endpoint_type = @node.provider_endpoint.endpoint_type
+    provider = { provider: endpoint_type,
+                 endpoint: @node.provider_endpoint.endpoint_url }
+    case endpoint_type
+    when 'aws'
+      provider[:aws_access_key_id] = @node.provider.access_key
+      provider[:aws_secret_access_key] = @node.provider.secret_key
+    end
+    begin
+      endpoint = Fog::Compute.new(provider)
+    rescue => e
+      logger.error "#{@stamp} Exception: #{e.message}."
+    end
+    endpoint
+  end
+
   def deregister_instance(node_instance = @node_instance)
     logger.info "#{@stamp} Deregistering instance #{node_instance.name}."
     @parent_resource["node/#{@node.id}/instance/#{node_instance.id}.json"].delete
@@ -660,12 +673,12 @@ class NodeAgent
     if (key = get_key)
       count.times do
         instance_options = {}
-        instance_options[:availability_zone] = @node.node_provider.aws_availability_zone if @node.node_provider.aws_availability_zone
-        instance_options[:image_id] = @node.node_provider.image_id if !@node.node_provider.image_id.empty?
-        instance_options[:kernel_id] = @node.node_provider.kernel_id if !@node.node_provider.kernel_id.empty?
-        instance_options[:ramdisk_id] = @node.node_provider.ramdisk_id if !@node.node_provider.ramdisk_id.empty?
+        instance_options[:availability_zone] = @node.provider_endpoint.availability_zone if @node.provider_endpoint.availability_zone
+        instance_options[:image_id] = @node.provider_endpoint.machine_image if !@node.provider_endpoint.machine_image.empty?
+        instance_options[:kernel_id] = @node.provider_endpoint.kernel_image if !@node.provider_endpoint.kernel_image.empty?
+        instance_options[:ramdisk_id] = @node.provider_endpoint.ramdisk_image if !@node.provider_endpoint.ramdisk_image.empty?
         instance_options[:flavor_id] = @node.node_instance_type.name
-        instance_options[:region] = @node.node_provider.region
+        instance_options[:region] = @node.provider_endpoint.region
         instance_options[:key_name] = key.name
         instance_options[:user_data] = node_credentials
         begin

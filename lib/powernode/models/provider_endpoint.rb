@@ -1,3 +1,3 @@
-class NodeProvider
+class ProviderEndpoint
   include PowerNode::ModelExtensions
 end
