@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 
 NAME="$(basename $0)"
-CFGFILE="$(dirname $0)/../${NAME}.yml"
-LOGFILE="$(dirname $0)/../log/${NAME}.log"
-WORKER="$(dirname $0)/../lib/${NAME}.rb"
-PIDFILE="$(dirname $0)/../tmp/pids/${NAME}.pid"
+BASEDIR="$(dirname $0)/.."
+CFGFILE="${BASEDIR}/${NAME}.yml"
+LOGFILE="${BASEDIR}/log/${NAME}.log"
+WORKER="${BASEDIR}/lib/${NAME}.rb"
+PIDFILE="${BASEDIR}/tmp/pids/${NAME}.pid"
 
 node_agent_requirements="mkisofs mksquashfs rsync ruby sudo"
 store_requirements="ruby"
+
+cd "${BASEDIR}"
 
 check_requirements()
 {
