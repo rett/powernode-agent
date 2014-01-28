@@ -12,7 +12,7 @@ log_cycle: daily
 init_expire: 0:01:00
 init_dir: /opt/powernode/init
 log_dir: /opt/powernode/node_agent/log
-module_dir: /opt/powernode/node_modules
+module_dir: /opt/powernode/modules
 tmp_dir: /opt/powernode/node_agent/tmp
 
 # SMTP options
@@ -33,7 +33,7 @@ ssh_key_dir: /opt/powernode/keys
 ssh_port: 22
 
 # Encryption options
-encrypted_attributes: [aws_secret_access_key, agent_key, ssh_key]
+encrypted_attributes: [secret_key, agent_key, ssh_key]
 encryption_cipher: aes-256-cbc
 encryption_key: insert_random_key_here
 encryption_key_length: 64
