@@ -100,12 +100,10 @@ class NodeAgent
         @operation = operation
         @node_instance = @node.node_instances.select { |i| i.id == @operation.node_instance_id }.first if @operation.try(:node_instance_id)
         @node_module_id = @operation.node_module_id if @operation.try(:node_module_id)
-        if !@operation.scheduled_at || (@operation.scheduled_at && Time.parse(@operation.scheduled_at) < Time.now)
-          @parent_resource['node']["#{@node.id}.json"].post({ operation_id: @operation.id, status: 'running', notifications: @notifications }.to_json,
-                                                            accept: :json, content_type: :json)
+        if (!@operation.scheduled_at || Time.parse(@operation.scheduled_at) < Time.now)
+          notify_parent(@operation.id, 'running')
           send("do_#{operation.command}") if respond_to?("do_#{@operation.command}")
-          @parent_resource['node']["#{@node.id}.json"].post({ operation_id: @operation.id, status: 'complete', notifications: @notifications }.to_json,
-                                                            accept: :json, content_type: :json)
+          notify_parent(@operation.id, 'complete')
         end
       end
     end
@@ -772,6 +770,14 @@ class NodeAgent
         end
       end
     end
+  end
+
+  def notify_parent(operation_id, status)
+    @parent_resource['node']["#{@node.id}.json"].post({ operation_id: operation_id,
+                                                        status: status,
+                                                        notifications: @notifications }.to_json,
+                                                      accept: :json, content_type: :json)
+    @notifications = []
   end
 
   def terminate_instance(node_instance)
