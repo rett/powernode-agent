@@ -1,3 +1,4 @@
+require 'powernode/models/extensions'
 require 'powernode/models/node'
 require 'powernode/models/node_architecture'
 require 'powernode/models/node_instance'

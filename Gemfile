@@ -1,5 +1,5 @@
 source 'https://rubygems.org'
-gem 'activesupport', '~> 4.0.2'
+gem 'activesupport', '~> 4.0.3'
 gem 'daemons'
 gem 'fog'
 gem 'haml'

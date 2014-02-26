@@ -2,27 +2,9 @@
 $:.unshift File.dirname(__FILE__)
 ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
-require 'rubygems'
-require 'bundler/setup'
-require 'active_support/core_ext/string/strip'
-require 'active_support/time'
-require 'find'
-require 'fog'
-require 'json'
-require 'net/ssh'
-require 'net/sftp'
-require 'openssl'
-require 'pony'
-require 'restclient'
-require 'sidekiq'
-require 'sidekiq-encryptor'
-require 'sidekiq-middleware'
-require 'tmpdir'
-require 'uuidtools'
 require 'powernode'
 
 class NodeAgent
-  include PowerNode
   include Sidekiq::Worker
 
   Pony.options = { from: PowerNode.config(:smtp_from_email), via: :smtp,
@@ -161,8 +143,7 @@ class NodeAgent
       begin
         session = Net::SSH.start(node_instance.public_ip_address,
                                  @node.admin_user,
-                                 key_data: @node.ssh_key,
-                                 paranoid: false)
+                                 key_data: @node.ssh_key)
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
@@ -183,10 +164,10 @@ class NodeAgent
         logger.error "#{@stamp} Exception: #{e.message}."
       end
       begin
-        address = @cloud.addresses.find { |ip| ip.server_id == nil }
+        address = @cloud.addresses.find { |ip| ip.server_id.nil? }
         address ||= @cloud.addresses.create
         address.server = cloud_instance if address
-        @notifications << Notification.new("Associated IP #{address.public_ip} for instance #{node_instance.name}.")
+        @notifications << Notification.new({ notice: "Associated IP #{address.public_ip} for instance #{node_instance.name}." })
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
@@ -196,16 +177,11 @@ class NodeAgent
   def do_instance_public_ip_disassociate(node_instance = @node_instance)
     if node_instance
       begin
-        cloud_instance = @cloud.servers.get(node_instance.name)
-      rescue => e
-        logger.error "#{@stamp} Exception: #{e.message}."
-      end
-      begin
         if (address = @cloud.addresses.find { |ip| ip.server_id =~ /#{node_instance.name}/ })
           logger.info "#{@stamp} Disassociating floating IP for instance #{node_instance.name}."
           address.server = nil
           address.destroy
-          @notifications << Notification.new("Disassociated IP #{address.public_ip} for instance #{node_instance.name}.")
+          @notifications << Notification.new({ notice: "Disassociated IP #{address.public_ip} from instance #{node_instance.name}." })
         end
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
@@ -218,7 +194,7 @@ class NodeAgent
       logger.info "#{@stamp} Rebooting instance #{node_instance.id}."
       begin
         @cloud.reboot_instances(node_instance.name)
-        @notifications << Notification.new("Instance #{node_instance.name} rebooted.")
+        @notifications << Notification.new({ notice: "Instance #{node_instance.name} rebooted." })
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
@@ -230,7 +206,7 @@ class NodeAgent
       logger.info "#{@stamp} Starting instance #{node_instance.id}."
       begin
         @cloud.start_instances(node_instance.name)
-        @notifications << Notification.new("Instance #{node_instance.name} started.")
+        @notifications << Notification.new({ notice: "Instance #{node_instance.name} started." })
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
@@ -242,7 +218,7 @@ class NodeAgent
       logger.info "#{@stamp} Stopping instance #{node_instance.name}."
       begin
         @cloud.stop_instances(node_instance.name)
-        @notifications << Notification.new("Instance #{node_instance.name} stopped.")
+        @notifications << Notification.new({ notice: "Instance #{node_instance.name} stopped." })
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
@@ -253,7 +229,7 @@ class NodeAgent
     if node_instance
       do_instance_public_ip_disassociate(node_instance)
       terminate_instance(node_instance)
-      @notifications << Notification.new("Instance #{node_instance.name} terminated.")
+      @notifications << Notification.new({ notice: "Instance #{node_instance.name} terminated." })
     end
   end
 
@@ -268,14 +244,13 @@ class NodeAgent
     end
     begin
       tmp_dir = Dir.mktmpdir
-      FileUtils.mkdir_p(File.join(tmp_dir, 'syslinux'))
     rescue => e
       logger.error "#{@stamp} Exception: #{e.message}."
     end
     begin
-      FileUtils.cp(File.join(init_dir, "#{@node.node_architecture.id}.isolinux"), File.join(tmp_dir, 'isolinux'))
-      FileUtils.cp(File.join(init_dir, "#{@node.node_architecture.id}.kernel"),   File.join(tmp_dir, 'kernel'))
-      FileUtils.cp(File.join(init_dir, "#{@node.node_architecture.id}.ramdisk"),  File.join(tmp_dir, 'ramdisk'))
+      FileUtils.cp(File.join(init_dir, 'isolinux.bin'), File.join(tmp_dir))
+      FileUtils.cp(File.join(init_dir, "#{@node.node_architecture.id}.kernel"), File.join(tmp_dir, 'kernel'))
+      FileUtils.cp(File.join(init_dir, "#{@node.node_architecture.id}.ramdisk"), File.join(tmp_dir, 'ramdisk'))
     rescue => e
       logger.error "#{@stamp} Exception: #{e.message}."
     end
@@ -306,7 +281,7 @@ class NodeAgent
         begin
           File.open(module_info, File::RDWR|File::CREAT, 0644) do |f|
             f.flock(File::LOCK_EX)
-            f << @parent_resource["node/#{@node.id}/module/#{node_module.id}.text"].get
+            f << @parent_resource["node/#{@node.id}/module/#{node_module.id}/config.text"].get
           end
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
@@ -362,17 +337,16 @@ class NodeAgent
     end
     node_iso_file = Tempfile.new("#{@node.id}.iso-")
     FileUtils.chmod(0644, node_iso_file)
-    system("sudo mkisofs -o #{node_iso_file.path} -b isolinux -c syslinux/boot.cat -R -J -l -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir} > /dev/null 2>&1")
+    system("sudo mkisofs -o #{node_iso_file.path} -b isolinux.bin -c syslinux/boot.cat -R -J -l -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir} > /dev/null 2>&1")
     if node_iso_file.size > 0
       begin
-        @node = Node.new(JSON.parse(@parent_resource["node/#{@node.id}/iso.json"].post(
+        @parent_resource["node/#{@node.id}/iso.html"].post(
           node_instance_id: node_instance.id,
           iso: File.open(node_iso_file),
           multipart: true,
-          content_type: 'application/octet-stream',
-          accept: :json)))
-        @notifications << Notification.new("ISO created for instance #{node_instance.name}")
+          content_type: 'application/octet-stream')
         logger.info "#{@stamp} ISO created for instance #{node_instance.id}."
+        @notifications << Notification.new({ notice: "ISO created for instance #{node_instance.name}" })
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
@@ -381,66 +355,46 @@ class NodeAgent
   end
 
   def do_node_module_build
+    notification = Notification.new
     node_module = NodeModule.new(JSON.parse(@parent_resource["node/#{@node.id}/module/#{@node_module_id}.json"].get))
-    logger.info "#{@stamp} Building module with #{@node.node_platform.package_manager} package manager."
     if @node.primary_instance && !node_module.package_spec.empty?
+      logger.info "#{@stamp} Building module #{node_module.id}."
       packages = node_module.package_spec.map { |p| Base64.decode64(p) }
       begin
         session = Net::SSH.start(@node.primary_instance.public_ip_address,
                                  @node.admin_user,
-                                 key_data: @node.ssh_key,
-                                 paranoid: false)
+                                 key_data: @node.ssh_key)
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
+        notification.error ||= "Error connecting to instance #{@node.primary_instance}\n#{e.message}"
       end
       if session
-        case @node.node_platform.package_manager
-        when 'apt-get'
-          logger.info "#{@stamp} Updating apt repository on node instance #{@node.primary_instance.id}."
-          begin
-            session.exec!("sudo apt-get update")
-          rescue => e
-            logger.error "#{@stamp} Exception: #{e.message}."
+        begin
+          response = session.verbose_exec!("sudo ipn -e #{node_module.build_script_id} #{node_module.id} /tmp/#{node_module.id}.spec")
+          output = response[:stdout]
+          error = response[:stderr]
+          exit_code = response[:exit_code]
+          if exit_code != 0
+            notification.warning ||= "Error installing packages for module #{node_module.name}\n#{output}"
+            notification.error ||= error
           end
-          logger.info "#{@stamp} Installing packages for module #{node_module.id}."
-          begin
-            session.exec!("sudo RUNLEVEL=1 apt-get -qy install #{packages.join(' ')}")
-          rescue => e
-            logger.error "#{@stamp} Exception: #{e.message}."
-          end
-          begin
-            spec = session.exec!("sudo dpkg -L #{packages.join(' ')} | grep '^/'")
-          rescue => e
-            logger.error "#{@stamp} Exception: #{e.message}."
-          end
-        when 'yum'
-          logger.info "#{@stamp} Installing packages for module #{node_module.id}."
-          begin
-            session.exec!("sudo yum -qy install #{packages.join(' ')}")
-          rescue => e
-            logger.error "#{@stamp} Exception: #{e.message}."
-          end
-          begin
-            spec = session.exec!("sudo rpm -ql #{packages.join(' ')} | grep '^/'")
-          rescue => e
-            logger.error "#{@stamp} Exception: #{e.message}."
-          end
+        rescue => e
+          logger.error "#{@stamp} Exception: #{e.message}."
+          notification.error ||= "Error installing packages for module #{node_module.name}\n#{e.message}"
         end
-        if spec
+        if exit_code == 0
           logger.info "#{@stamp} Uploading spec for module #{node_module.id}."
           begin
+            spec = session.exec!("cat /tmp/#{node_module.id}.spec")
             @parent_resource["node/#{@node.id}/module/#{node_module.id}.json"].post({ spec: spec }, accept: :json)
+            notification.notice ||= "Successfully built module #{node_module.name}"
           rescue => e
             logger.error "#{@stamp} Exception: #{e.message}."
           end
-          @notifications << Notification.new("Build complete for module #{node_module.name}")
-        else
-          @notifications << Notification.new("Unable to build module #{node_module.name}", :error)
         end
       end
-    else
-      @notifications << Notification.new("No package list for module #{node_module.name}", :error)
     end
+    @notifications << notification if notification.keys.size > 0
   end
 
   def do_node_module_commit
@@ -463,16 +417,18 @@ class NodeAgent
       end
       if File.directory?(tmp_dir)
         begin
-          system("sudo rsync -lptgoDH -e \"ssh -q -p #{PowerNode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" " +
-                 "--files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.public_ip_address}:/ #{tmp_dir}/ > /dev/null 2>&1")
+          system("sudo rsync -lptgoDH -e \"ssh -q -p #{PowerNode.config(:ssh_port)} -i #{@node.ssh_key_file}\" --files-from=#{tmp_spec.path}" +
+                 "#{@node.admin_user}@#{@node.primary_instance.public_ip_address}:/ #{tmp_dir}/ > /dev/null 2>&1")
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
         end
         case $?.exitstatus
         when 23
           logger.warn "#{@stamp} Not all files transferred."
+          @notifications << Notification.new({ warning: "Not all files transferred for module #{node_module.name}" })
         when 255
           logger.error "#{@stamp} Unable to connect."
+          @notifications << Notification.new({ error: "Unable to connect to instance #{@node.primary_instance.name}" })
           FileUtils.remove_entry_secure(tmp_dir, force: true)
         end
       end
@@ -486,18 +442,17 @@ class NodeAgent
         end
         if tmp_module.size > 0
           begin
-            node_module = NodeModule.new(JSON.parse(@parent_resource["node/#{@node.id}/module/#{node_module.id}.json"].post(
+            @parent_resource["node/#{@node.id}/module/#{node_module.id}.html"].post(
               data: File.open(tmp_module),
               multipart: true,
-              content_type: 'application/octet-stream',
-              accept: :json)))
+              content_type: 'application/octet-stream')
           rescue => e
             logger.error "#{@stamp} Exception: #{e.message}."
           end
           FileUtils.remove_entry_secure(tmp_module, force: true)
           FileUtils.remove_entry_secure(tmp_dir, force: true)
-          @notifications << Notification.new("Commit complete for module #{node_module.name}")
           logger.info "#{@stamp} Commit complete for module #{node_module.id}."
+          @notifications << Notification.new({ notice: "Commit complete for module #{node_module.name}" })
         else
           logger.error "#{@stamp} Commit aborted."
         end
@@ -506,8 +461,10 @@ class NodeAgent
       end
     elsif @node.primary_instance.nil?
       logger.info "#{@stamp} Commit aborted: No primary instance found."
+      @notifications << Notification.new({ error: "Commit aborted: No primary instance found" })
     else
       logger.info "#{@stamp} Commit aborted: No module specification."
+      @notifications << Notification.new({ error: "Commit aborted: No module specification" })
     end
   end
 
@@ -546,12 +503,12 @@ class NodeAgent
                   subject: "SSH key for #{@node.name}",
                   body: body,
                   attachments: { "#{@node.name}.txt" => encrypted_ssh_key })
-        @notifications << Notification.new("SSH key delivered for #{@node.name}")
+        @notifications << Notification.new({ notice: "SSH key for #{@node.name} delivered to #{recipient}" })
       rescue => e
         logger.error "#{@stamp} Exception: #{e.message}."
       end
     else
-      @notifications << Notification.new("SSH key not found for node #{@node.name}", :error)
+      @notifications << Notification.new({ error: "SSH key not found for node #{@node.name}" })
     end
   end
 
@@ -562,8 +519,7 @@ class NodeAgent
         begin
           session = Net::SSH.start(node_instance.public_ip_address,
                                    @node.admin_user,
-                                   key_data: @node.ssh_key,
-                                   paranoid: false)
+                                   key_data: @node.ssh_key)
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
         end
@@ -575,7 +531,7 @@ class NodeAgent
       end
       @parent_resource["node/#{@node.id}/instance.json"].post({ node_instance: node_instance }.to_json, accept: :json, content_type: :json)
     end
-    @notifications << Notification.new("Node instance update complete.")
+    @notifications << Notification.new({ notice: "Node instance update complete." })
   end
 
   private
@@ -629,7 +585,7 @@ class NodeAgent
         logger.error "#{@stamp} Exception: #{e.message}."
       end
       if key && key.private_key
-        node_attributes = { ssh_key: PowerNode.encrypt(key.private_key), ssh_key_fingerprint: key.fingerprint }
+        node_attributes = { ssh_key: key.private_key, ssh_key_fingerprint: key.fingerprint }
         logger.info "#{@stamp} Uploading new keypair #{keypair_name} to parent."
         if @parent_resource["node/#{@node.id}"].post(node: node_attributes)
           if (ssh_key_dir = PowerNode.config(:ssh_key_dir))
@@ -650,7 +606,7 @@ class NodeAgent
   def init_sync
     init_dir = PowerNode.config(:init_dir)
     FileUtils.mkdir_p(init_dir)
-    %w[kernel ramdisk extlinux isolinux pxelinux syslinux].each do |component|
+    %w[kernel ramdisk].each do |component|
       init_file = File.join(init_dir, "#{@node.node_architecture.id}.#{component}")
       component_checksum = @node.node_architecture.send("#{component}_checksum")
       if component_checksum.present? && (!File.exists?(init_file) || component_checksum != Digest::SHA2.new(PowerNode.config(:checksum_bitlength)).hexdigest(File.binread(init_file)))
@@ -710,7 +666,7 @@ class NodeAgent
       ID=#{@node_instance ? @node_instance.id : @node.id}
       KEY=#{(@node_instance && !@node_instance.agent_key.blank?) ? @node_instance.agent_key : @node.agent_key}
       PARENT=#{PowerNode.config(:node_proxy_url).nil? ? PowerNode.config(:node_server_url) : PowerNode.config(:node_proxy_url)}
-      INIT_SCRIPT=#{@node.node_script_name}
+      INIT_SCRIPT=#{@node.init_script_id}
     EOF
   end
 

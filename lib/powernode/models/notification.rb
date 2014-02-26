@@ -1,25 +1,28 @@
 class Notification
-  def initialize(content, severity = :info)
+  TYPES = [:alert, :error, :information, :notice, :warning]
+
+  def initialize(params = {})
+    raise PowerNode::HashRequiredError unless params.is_a?(Hash)
     @id ||= UUIDTools::UUID.timestamp_create.to_s
-    @created_at = Time.now
-    @content = content
-    @severity = severity
+    @created_at = UUIDTools::UUID.parse(@id).timestamp
+    @messages = params
   end
 
-  def class
-    @class
+  def keys
+    @messages.keys
   end
 
-  def class=(value)
-    @class = value
+  def messages
+    @messages
   end
 
-  def content
-    @content
-  end
-
-  def content=(value)
-    @content = value
+  TYPES.each do |type|
+    define_method(type) do
+      @messages[type]
+    end
+    define_method("#{type}=".to_sym) do |message|
+      @messages[type] = message
+    end
   end
 
   def to_hash

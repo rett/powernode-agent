@@ -2,13 +2,6 @@
 $:.unshift File.dirname(__FILE__)
 ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
-require 'rubygems'
-require 'bundler/setup'
-require 'active_support/time'
-require 'json'
-require 'restclient'
-require 'sidekiq'
-require 'sidekiq-encryptor'
 require 'powernode'
 require 'node_agent'
 
@@ -20,8 +13,6 @@ Sidekiq.configure_client do |config|
 end
 
 class NodePoller
-  include PowerNode
-
   def initialize
     ['TERM', 'INT'].each do |signal|
       trap(signal) do
