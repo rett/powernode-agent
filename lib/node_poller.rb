@@ -14,6 +14,7 @@ end
 
 class NodePoller
   def initialize
+    logger.warn 'Node Poller started.'
     ['TERM', 'INT'].each do |signal|
       trap(signal) do
         Thread.new do
@@ -28,6 +29,14 @@ class NodePoller
   def enqueue_message(command, node)
     message = ActiveSupport::JSON.encode({ command: command, node_id: node.id })
     logger.info "Queued #{command} for node #{node.id}." if NodeAgent.perform_async(message)
+  end
+
+  def logger
+    if @logger.nil?
+      @logger = Logger.new(File.join(PowerNode.config(:log_dir), PowerNode.config(:node_poller_logfile)), PowerNode.config(:log_cycle))
+      @logger.level = Logger.const_get(PowerNode.config(:node_poller_loglevel).upcase)
+    end
+    @logger
   end
 
   def poll
@@ -47,23 +56,11 @@ class NodePoller
   end
 end
 
-def logger
-  if @logger.nil?
-    @logger = Logger.new(File.join(PowerNode.config(:log_dir), PowerNode.config(:node_poller_logfile)), PowerNode.config(:log_cycle))
-    @logger.level = Logger.const_get(PowerNode.config(:node_poller_loglevel).upcase)
-  end
-  @logger
-end
-
 def run!
   poller = NodePoller.new
-  logger.info 'Node Poller started.'
   loop do
     poller.poll
-    if $shutdown
-      logger.warn 'Node Poller stopped.'
-      exit 0
-    end
+    exit 0 if $shutdown
   end
 end
 

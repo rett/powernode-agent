@@ -661,6 +661,14 @@ class NodeAgent
     end
   end
 
+  def logger
+    if @logger.nil?
+      @logger = Logger.new(File.join(PowerNode.config(:log_dir), PowerNode.config(:node_agent_logfile)), PowerNode.config(:log_cycle))
+      @logger.level = Logger.const_get(PowerNode.config(:node_agent_loglevel).upcase)
+    end
+    @logger
+  end
+
   def node_credentials
     <<-EOF.strip_heredoc
       ID=#{@node_instance ? @node_instance.id : @node.id}
