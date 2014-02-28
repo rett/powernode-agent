@@ -417,8 +417,8 @@ class NodeAgent
       end
       if File.directory?(tmp_dir)
         begin
-          system("sudo rsync -lptgoDH -e \"ssh -q -p #{PowerNode.config(:ssh_port)} -i #{@node.ssh_key_file}\" --files-from=#{tmp_spec.path}" +
-                 "#{@node.admin_user}@#{@node.primary_instance.public_ip_address}:/ #{tmp_dir}/ > /dev/null 2>&1")
+          system("sudo rsync -lptgoDH -e \"ssh -q -p #{PowerNode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{@node.ssh_key_file}\" " +
+                 "--files-from=#{tmp_spec.path} #{@node.admin_user}@#{@node.primary_instance.public_ip_address}:/ #{tmp_dir}/ > /dev/null 2>&1")
         rescue => e
           logger.error "#{@stamp} Exception: #{e.message}."
         end
