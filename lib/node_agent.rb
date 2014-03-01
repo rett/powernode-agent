@@ -335,14 +335,9 @@ class NodeAgent
         end
       end
     end
-    begin
-      system("sudo chown -R root:root #{tmp_dir}")
-    rescue => e
-      logger.error "#{@stamp} Exception: #{e.message}."
-    end
     node_iso_file = Tempfile.new("#{@node.id}.iso-")
     FileUtils.chmod(0644, node_iso_file)
-    system("sudo mkisofs -o #{node_iso_file.path} -b isolinux.bin -c syslinux/boot.cat -R -J -l -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir} > /dev/null 2>&1")
+    system("sudo mkisofs -o #{node_iso_file.path} -b isolinux.bin -c syslinux/boot.cat -r -J -l -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir} > /dev/null 2>&1")
     if node_iso_file.size > 0
       begin
         @parent_resource["node/#{@node.id}/iso.html"].post(
