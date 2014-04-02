@@ -487,7 +487,7 @@ class NodeAgent
         Attached is the encrypted SSH key for node #{@node.name}.
 
         You must decrypt the ssh key with the following command:
-        $ openssl #{PowerNode.config(:encryption_cipher)} -base64 -d -in #{@node.name}.txt -out #{@node.name}.pem -iv #{iv.unpack('H*')[0]} -K [encryption key]
+        $ openssl #{PowerNode.config(:encryption_cipher)} -base64 -d -in "#{@node.name}.txt" -out "#{@node.name}.pem" -iv #{iv.unpack('H*')[0]} -K [encryption key]
 
         Change the file permissions:
         $ chmod 600 #{@node.name}.pem
