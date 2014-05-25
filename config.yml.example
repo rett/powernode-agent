@@ -1,8 +1,8 @@
 # Shared options
 id: 12345123-3456-012f-7654-1027e1212121
 key: secret_key
-node_server_url: http://127.0.0.1:3000
-node_proxy_url:
+server_url: http://127.0.0.1:3000
+proxy_url:
 realm: Node Alchemy
 domain: powernode.net
 module_compression: xz
@@ -11,9 +11,9 @@ checksum_util: sha256sum
 log_cycle: daily
 init_expire: 0:01:00
 init_dir: /opt/powernode/init
-log_dir: /opt/powernode/node_agent/log
+log_dir: /opt/powernode/agent/log
 module_dir: /opt/powernode/modules
-tmp_dir: /opt/powernode/node_agent/tmp
+tmp_dir: /opt/powernode/agent/tmp
 
 # SMTP options
 smtp_from_email: support@nodealchemy.com
@@ -27,8 +27,8 @@ smtp_enable_starttls_auto: true
 
 # SSL options
 ssl_enabled: true
-ssl_chain_file: /opt/powernode/node_agent/dev.ipnode.net.pem
-ssl_key_file: /opt/powernode/node_agent/dev.ipnode.net.key
+ssl_chain_file: /opt/powernode/agent/dev.ipnode.net.pem
+ssl_key_file: /opt/powernode/agent/dev.ipnode.net.key
 ssh_key_dir: /opt/powernode/keys
 ssh_port: 22
 
@@ -45,32 +45,32 @@ redis_namespace: alchemy
 redis_server: redis://localhost:6379/0
 
 # Node Poller options
-node_poller_interval: 10
-node_poller_logfile: node_poller.log
-node_poller_loglevel: debug
+poller_interval: 10
+poller_logfile: poller.log
+poller_loglevel: debug
 
 # Node Proxy options
-node_proxy_ip: 0.0.0.0
-node_proxy_port: 4567
-node_proxy_logfile: node_proxy.log
-node_proxy_loglevel: debug
-node_proxy_redirect: false
+proxy_ip: 0.0.0.0
+proxy_port: 4567
+proxy_logfile: proxy.log
+proxy_loglevel: debug
+proxy_redirect: false
 
 # Node Mailer options
-node_mailer_log_file: node_mailer.log
-node_mailer_log_level: debug
+mailer_log_file: mailer.log
+mailer_log_level: debug
 
 # Node Agent options
-node_agent_cloud_error_limit: 3
-node_agent_job_expiration: 600
-node_agent_job_retries: 0
-node_agent_logfile: node_agent.log
-node_agent_loglevel: debug
-node_agent_queue: node_agent
+agent_cloud_error_limit: 3
+agent_job_expiration: 600
+agent_job_retries: 0
+agent_logfile: agent.log
+agent_loglevel: debug
+agent_queue: agent
 
 # Node Store options
-node_store_queue: store
-node_store_logfile: node_store.log
-node_store_loglevel: debug
-node_store_job_expiration: 600
-node_store_job_retries: 1
+store_queue: store
+store_logfile: store.log
+store_loglevel: debug
+store_job_expiration: 600
+store_job_retries: 1

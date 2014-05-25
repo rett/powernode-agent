@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-$:.unshift File.dirname(__FILE__)
+$:.unshift File.join(File.dirname(__FILE__), '..', 'lib')
 ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
 require 'rubygems'
@@ -15,7 +15,6 @@ require 'redis/list'
 require 'redis/objects'
 require 'restclient'
 require 'sidekiq'
-require 'sidekiq-encryptor'
 require 'sidekiq-middleware'
 require 'tmpdir'
 require 'powernode'
@@ -26,12 +25,6 @@ class NodeStore
 
   Sidekiq.configure_server do |config|
     config.redis = { namespace: PowerNode.config(:redis_namespace), url: PowerNode.config(:redis_server) }
-    config.server_middleware do |chain|
-      chain.add Sidekiq::Encryptor::Server, key: PowerNode.config('redis_encryption_key') if PowerNode.config('redis_encryption_key')
-    end
-    config.client_middleware do |chain|
-      chain.add Sidekiq::Encryptor::Client, key: PowerNode.config('redis_encryption_key') if PowerNode.config('redis_encryption_key')
-    end
   end
 
   sidekiq_options({ queue: PowerNode.config(:store_queue),
@@ -43,7 +36,7 @@ class NodeStore
     @params = ActiveSupport::JSON.decode(message)
     @operation = @params['operation']
     begin
-      @node_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1/node',
+      @node_resource = RestClient::Resource.new(PowerNode.config(:server_url) + '/api/v1/node',
                                                 PowerNode.config(:id),
                                                 PowerNode.config(:key))
       send("do_#{@operation}") if respond_to?("do_#{@operation}")

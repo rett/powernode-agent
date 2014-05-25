@@ -1,35 +1,14 @@
 class Notification
-  TYPES = [:alert, :error, :information, :notice, :warning]
+  include PowerNode::ModelExtensions
 
-  def initialize(params = {})
-    raise PowerNode::HashRequiredError unless params.is_a?(Hash)
-    @id ||= UUIDTools::UUID.timestamp_create.to_s
-    @created_at = UUIDTools::UUID.parse(@id).timestamp
-    @messages = params
+  CATEGORIES = %w[alert error warning information notice]
+
+  def initialize(category, summary, content = '')
+    raise PowerNode::InvalidArgumentError unless Notification::CATEGORIES.include?(category.to_s)
+    @category = category.to_s
+    @summary = summary.to_s
+    @content = content.to_s
   end
 
-  def keys
-    @messages.keys
-  end
-
-  def messages
-    @messages
-  end
-
-  TYPES.each do |type|
-    define_method(type) do
-      @messages[type]
-    end
-    define_method("#{type}=".to_sym) do |message|
-      @messages[type] = message
-    end
-  end
-
-  def to_hash
-    Hash[instance_variables.map { |name| [name.to_s.delete("@"), instance_variable_get(name)] } ]
-  end
-
-  def to_json(*a)
-    to_hash.to_json(a)
-  end
+  attr_accessor :category, :content, :summary
 end

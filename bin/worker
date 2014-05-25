@@ -4,13 +4,11 @@ NAME="$(basename $0)"
 BASEDIR="$(dirname $0)/.."
 CFGFILE="${BASEDIR}/${NAME}.yml"
 LOGFILE="${BASEDIR}/log/${NAME}.log"
-WORKER="${BASEDIR}/lib/${NAME}.rb"
+WORKER="${BASEDIR}/workers/${NAME}.rb"
 PIDFILE="${BASEDIR}/tmp/pids/${NAME}.pid"
 
 node_agent_requirements="mkisofs mksquashfs rsync ruby sudo"
 store_requirements="ruby"
-
-cd "${BASEDIR}"
 
 check_requirements()
 {
@@ -47,7 +45,7 @@ pool_run()
   pool_getpid
   if [ ! "${PID}" ]; then
     echo "Running ${NAME} pool..."
-    bundle exec sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r ${WORKER}
+    bundle exec sidekiq -v -C "${CFGFILE}" -P "${PIDFILE}" -r ${WORKER}
   fi
 }
 

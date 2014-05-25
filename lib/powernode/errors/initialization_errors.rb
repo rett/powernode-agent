@@ -4,4 +4,7 @@ module PowerNode
 
   # Hash required error
   class HashRequiredError < StandardError; end
+
+  # Invalid argument error
+  class InvalidArgumentError < StandardError; end
 end

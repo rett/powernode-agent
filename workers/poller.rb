@@ -1,15 +1,12 @@
 #!/usr/bin/env ruby
-$:.unshift File.dirname(__FILE__)
+$:.unshift File.join(File.dirname(__FILE__), '..', 'lib')
 ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
 require 'powernode'
-require 'node_agent'
+require_relative 'agent'
 
 Sidekiq.configure_client do |config|
   config.redis = { namespace: PowerNode.config(:redis_namespace), url: PowerNode.config(:redis_server) }
-  config.client_middleware do |chain|
-    chain.add Sidekiq::Encryptor::Client, key: PowerNode.config('redis_encryption_key') if PowerNode.config('redis_encryption_key')
-  end
 end
 
 class NodePoller
@@ -23,18 +20,17 @@ class NodePoller
         end
       end
     end
-    @parent = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1', PowerNode.config(:id), PowerNode.config(:key))
+    @parent = RestClient::Resource.new(PowerNode.config(:server_url) + '/api/v1', PowerNode.config(:id), PowerNode.config(:key))
   end
 
   def enqueue_message(command, node)
-    message = ActiveSupport::JSON.encode({ command: command, node_id: node.id })
-    logger.info "Queued #{command} for node #{node.id}." if NodeAgent.perform_async(message)
+    logger.info "Queued #{command} for node #{node.id}." if NodeAgent.perform_async(command: command, node_id: node.id)
   end
 
   def logger
     if @logger.nil?
-      @logger = Logger.new(File.join(PowerNode.config(:log_dir), PowerNode.config(:node_poller_logfile)), PowerNode.config(:log_cycle))
-      @logger.level = Logger.const_get(PowerNode.config(:node_poller_loglevel).upcase)
+      @logger = Logger.new(File.join(PowerNode.config(:log_dir), PowerNode.config(:poller_logfile)), PowerNode.config(:log_cycle))
+      @logger.level = Logger.const_get(PowerNode.config(:poller_loglevel).upcase)
     end
     @logger
   end
@@ -52,7 +48,7 @@ class NodePoller
         enqueue_message(:poll_node, node)
       end
     end
-    sleep PowerNode.config(:node_poller_interval)
+    sleep PowerNode.config(:poller_interval)
   end
 end
 
