@@ -1,32 +1,14 @@
 class Notification
-  def initialize(content, severity = :info)
-    @id ||= UUIDTools::UUID.timestamp_create.to_s
-    @created_at = Time.now
-    @content = content
-    @severity = severity
+  include PowerNode::ModelExtensions
+
+  CATEGORIES = %w[alert error warning information notice]
+
+  def initialize(category, summary, content = '')
+    raise PowerNode::InvalidArgumentError unless Notification::CATEGORIES.include?(category.to_s)
+    @category = category.to_s
+    @summary = summary.to_s
+    @content = content.to_s
   end
 
-  def class
-    @class
-  end
-
-  def class=(value)
-    @class = value
-  end
-
-  def content
-    @content
-  end
-
-  def content=(value)
-    @content = value
-  end
-
-  def to_hash
-    Hash[instance_variables.map { |name| [name.to_s.delete("@"), instance_variable_get(name)] } ]
-  end
-
-  def to_json(*a)
-    to_hash.to_json(a)
-  end
+  attr_accessor :category, :content, :summary
 end

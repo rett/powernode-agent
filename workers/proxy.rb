@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-$:.unshift File.dirname(__FILE__)
+$:.unshift File.join(File.dirname(__FILE__), '..', 'lib')
 ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
 require 'rubygems'
@@ -13,19 +13,15 @@ require 'rack/auth/abstract/request'
 require 'redis'
 require 'restclient'
 require 'sidekiq'
-require 'sidekiq-encryptor'
 require 'sinatra/base'
 require 'sinatra/multi_route'
 require 'sinatra/synchrony'
-require 'powernode'
-require 'node_store'
 require 'thin'
+require 'powernode'
+require_relative 'store'
 
 Sidekiq.configure_client do |config|
   config.redis = { namespace: PowerNode.config(:redis_namespace), url: PowerNode.config(:redis_server) }
-  config.client_middleware do |chain|
-    chain.add Sidekiq::Encryptor::Client, key: PowerNode.config('redis_encryption_key') if PowerNode.config('redis_encryption_key')
-  end
 end
 
 Redis.current = Sidekiq::RedisConnection
@@ -44,7 +40,7 @@ class NodeProxy < Sinatra::Base
     auth = Rack::Auth::Basic::Request.new(@env)
     id, key = auth.credentials
     node = params[:node]
-    parent_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1/node/' + node, id, key)
+    parent_resource = RestClient::Resource.new(PowerNode.config(:server_url) + '/api/v1/node/' + node, id, key)
     begin
       node_modules = JSON.parse(parent_resource['modules'].get).map { |m| NodeModule.new(m) }
     rescue => e
@@ -79,8 +75,8 @@ class NodeProxy < Sinatra::Base
     auth = Rack::Auth::Basic::Request.new(@env)
     id, key = auth.credentials
     node = params[:node]
-    node_module_id = params[:node_module]
-    parent_resource = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1/node/' + node, id, key)
+    node_module_id = params[:module]
+    parent_resource = RestClient::Resource.new(PowerNode.config(:server_url) + '/api/v1/node/' + node, id, key)
     begin
       node_module = NodeModule.new(JSON.parse(parent_resource["module/#{node_module_id}"].get))
     rescue => e
@@ -100,16 +96,16 @@ class NodeProxy < Sinatra::Base
 
   route :get, :post, '/api/v1/*' do |path|
     if PowerNode.config(:proxy_redirect) == 'true'
-      logger.info "Redirecting request to #{PowerNode.config(:node_server_url)}/api/v1/#{path}."
+      logger.info "Redirecting request to #{PowerNode.config(:server_url)}/api/v1/#{path}."
       begin
-        redirect PowerNode.config(:node_server_url) + "/api/v1/#{path}"
+        redirect PowerNode.config(:server_url) + "/api/v1/#{path}"
       rescue => e
         logger.error "Exception: #{e.message}"
       end
     else
       auth = Rack::Auth::Basic::Request.new(@env)
       node, key = auth.credentials
-      parent_request = RestClient::Resource.new(PowerNode.config(:node_server_url) + '/api/v1/' + params[:splat].join, node, key)
+      parent_request = RestClient::Resource.new(PowerNode.config(:server_url) + '/api/v1/' + params[:splat].join, node, key)
       begin
         logger.info "Forwarding #{request.env['REQUEST_METHOD']} #{request.env['REQUEST_PATH']}"
         method = request.env["REQUEST_METHOD"].gsub(/\W/, '').downcase.to_sym
@@ -126,14 +122,14 @@ class NodeProxy < Sinatra::Base
 
   def logger
     if @logger.nil?
-      @logger = Logger.new(File.join(PowerNode.config(:log_dir), PowerNode.config(:node_proxy_logfile)), PowerNode.config(:log_cycle))
-      @logger.level = Logger.const_get(PowerNode.config(:node_proxy_loglevel).upcase)
+      @logger = Logger.new(File.join(PowerNode.config(:log_dir), PowerNode.config(:proxy_logfile)), PowerNode.config(:log_cycle))
+      @logger.level = Logger.const_get(PowerNode.config(:proxy_loglevel).upcase)
     end
     @logger
   end
 
   def run!
-    rack_handler_config = { Host: PowerNode.config(:node_proxy_ip), Port: PowerNode.config(:node_proxy_port) }
+    rack_handler_config = { Host: PowerNode.config(:proxy_ip), Port: PowerNode.config(:proxy_port) }
     ssl_options = {
         cert_chain_file: File.join(PowerNode.config(:ssl_chain_file)),
         private_key_file: File.join(PowerNode.config(:ssl_key_file))

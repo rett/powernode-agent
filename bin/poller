@@ -3,11 +3,11 @@ require 'daemons'
 basedir = File.join(File.dirname(__FILE__), '..')
 
 daemon_options = {
-  :app_name   => "node_proxy",
+  :app_name   => 'poller',
   :dir_mode   => :normal,
   :dir        => File.join(basedir, 'tmp'),
   :log_dir    => File.join(basedir, 'log'),
   :monitor    => true
 }
 
-Daemons.run(File.join(basedir, 'lib', 'node_proxy.rb'), daemon_options)
+Daemons.run(File.join(basedir, 'workers', 'poller.rb'), daemon_options)

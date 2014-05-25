@@ -1,80 +1,26 @@
 module PowerNode
-  module ModelExtensions
-    def initialize(params = {})
-      raise "expected Hash param" unless params.kind_of? Hash
-      params.each do |key, value|
-        value = String.new if value.nil?
-        if PowerNode.config('encrypted_attributes').include?(key) && value.match(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/)
-          instance_variable_set(sanitize_key(key), value.sub(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/, ''))
-          define_singleton_method(key.to_s) { PowerNode.decrypt(instance_variable_get(sanitize_key(key))) }
-          define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), PowerNode.encrypt(val)) }
-        elsif PowerNode.config('encrypted_attributes').include?(key)
-          instance_variable_set(sanitize_key(key), PowerNode.encrypt(value))
-          define_singleton_method(key.to_s) { PowerNode.decrypt(instance_variable_get(sanitize_key(key))) }
-          define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), PowerNode.encrypt(val)) }
-          define_singleton_method("#{key.to_s}_dirty") { true }
-          define_singleton_method("dirty?") { true }
-        else
-          instance_variable_set(sanitize_key(key), value)
-          define_singleton_method(key.to_s) { instance_variable_get(sanitize_key(key)) }
-          define_singleton_method("#{key.to_s}=") { |val| instance_variable_set(sanitize_key(key), val) }
-        end
-        define_singleton_method('raw_' + key.to_s) { instance_variable_get(sanitize_key(key)) }
-      end
-      define_singleton_method('dirty?') { false } unless self.respond_to?(:dirty?)
-      self.build_objects if self.respond_to?(:build_objects)
-    end
-
-    def to_hash
-      Hash[instance_variables.map { |name| [name.to_s.delete("@"), instance_variable_get(name)] } ]
-    end
-
-    def to_json(*a)
-      to_hash.to_json(a)
-    end
-
-    private
-
-    def sanitize_key(key)
-      "@#{key.to_s.gsub(/\W/, '')}".to_sym
-    end
-  end
-
   def self.config(key)
     @config ||= YAML.load_file(File.join(File.dirname(__FILE__), '..', 'config.yml'))
     @config[key.to_s]
   end
-
-  def self.decrypt(data, encryption_cipher = PowerNode.config('encryption_cipher'), encryption_key = PowerNode.config('encryption_key'))
-    if data.size > 0 && encryption_cipher && encryption_key
-      cipher = OpenSSL::Cipher.new(encryption_cipher)
-      cipher.decrypt
-      cipher.key = encryption_key
-      decrypted_data = URI.unescape(data.sub(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/, ''))
-      decrypted_data = Base64.decode64(decrypted_data)
-      cipher.iv = decrypted_data.slice!(0, 16)
-      decrypted_data = cipher.update(decrypted_data) + cipher.final
-    else
-      decrypted_data = data
-    end
-    decrypted_data
-  end
-
-  def self.encrypt(data, encryption_cipher = PowerNode.config('encryption_cipher'), encryption_key = PowerNode.config('encryption_key'))
-    if data.size > 0 && encryption_cipher && encryption_key && !data.match(/\A#{Regexp.escape(PowerNode.config(:encryption_prefix))}*/)
-      cipher = OpenSSL::Cipher.new(encryption_cipher)
-      cipher.encrypt
-      cipher.key = encryption_key
-      iv = cipher.random_iv
-      encrypted_data = cipher.update(data) + cipher.final
-      encrypted_data = iv + encrypted_data
-      encrypted_data = Base64.encode64(encrypted_data)
-      encrypted_data = URI.escape(PowerNode.config(:encryption_prefix) + encrypted_data)
-    else
-      encrypted_data = data
-    end
-    encrypted_data
-  end
 end
 
+require 'rubygems'
+require 'bundler/setup'
+require 'active_support/core_ext/string/strip'
+require 'active_support/time'
+require 'find'
+require 'fog'
+require 'json'
+require 'net/ssh'
+require 'net/sftp'
+require 'openssl'
+require 'pony'
+require 'restclient'
+require 'sidekiq'
+require 'sidekiq-middleware'
+require 'tmpdir'
+require 'uuidtools'
+require 'powernode/net-ssh'
+require 'powernode/errors'
 require 'powernode/models'
