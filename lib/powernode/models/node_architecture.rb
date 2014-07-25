@@ -1,3 +1,3 @@
 class NodeArchitecture
-  include PowerNode::ModelExtensions
+  include Her::Model
 end

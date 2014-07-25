@@ -1,22 +1,26 @@
 # Shared options
 id: 12345123-3456-012f-7654-1027e1212121
 key: secret_key
-server_url: http://127.0.0.1:3000
+server_url: http://localhost:3000
 proxy_url:
 realm: Node Alchemy
-domain: powernode.net
+domain: example.com
 module_compression: xz
 checksum_bitlength: 256
-checksum_util: sha256sum
+instance_key_length: 32
 log_cycle: daily
-init_expire: 0:01:00
+data_expiration: 0:30:00
+image_blocksize: 1024
+image_padding: 10485760
 init_dir: /opt/powernode/init
 log_dir: /opt/powernode/agent/log
-module_dir: /opt/powernode/modules
+log_file: powernode.log
+log_level: debug
 tmp_dir: /opt/powernode/agent/tmp
 
 # SMTP options
 smtp_from_email: support@nodealchemy.com
+smtp_method: smtp
 smtp_server: mail.powernode.net
 smtp_port: 25
 smtp_domain: nodealchemy.com
@@ -35,42 +39,32 @@ ssh_port: 22
 # Encryption options
 encrypted_attributes: [secret_key, agent_key, ssh_key]
 encryption_cipher: aes-256-cbc
-encryption_key: insert_random_key_here
 encryption_key_length: 64
 encryption_prefix: "encrypted:"
 
 # Redis options
-redis_encryption_key: insert_random_key_here
 redis_namespace: alchemy
 redis_server: redis://localhost:6379/0
 
 # Node Poller options
 poller_interval: 10
-poller_logfile: poller.log
-poller_loglevel: debug
 
 # Node Proxy options
 proxy_ip: 0.0.0.0
 proxy_port: 4567
-proxy_logfile: proxy.log
-proxy_loglevel: debug
 proxy_redirect: false
 
-# Node Mailer options
-mailer_log_file: mailer.log
-mailer_log_level: debug
-
-# Node Agent options
+# Agent options
 agent_cloud_error_limit: 3
-agent_job_expiration: 600
+agent_job_expiration: 3600
 agent_job_retries: 0
-agent_logfile: agent.log
-agent_loglevel: debug
 agent_queue: agent
 
 # Node Store options
-store_queue: store
-store_logfile: store.log
-store_loglevel: debug
-store_job_expiration: 600
+store_dir: store
+store_job_expiration: 3600
 store_job_retries: 1
+store_queue: store
+
+# Secrets
+encryption_key:

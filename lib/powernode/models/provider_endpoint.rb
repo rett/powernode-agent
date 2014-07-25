@@ -1,3 +1,3 @@
 class ProviderEndpoint
-  include PowerNode::ModelExtensions
+  include Her::Model
 end

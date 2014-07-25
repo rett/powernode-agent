@@ -1,3 +1,5 @@
 class NodeTemplate
-  include PowerNode::ModelExtensions
+  include Her::Model
+
+  belongs_to :node_architecture
 end
