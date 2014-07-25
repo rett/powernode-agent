@@ -113,7 +113,6 @@ class NodeInstance
       response = Powernode.server.get("node_modules/#{node_module.id}/download/data.html")
       Powernode.logger.info "DOWNLOAD STATUS: #{response.status}"
       if response.status == 200
-        Powernode.logger.info "\n\nSUCCESSFULLY DOWNLOADED MODULE: #{module_file_name}\n"
         begin
           File.open(module_file, File::RDWR|File::CREAT, 0644) do |f|
             f.flock(File::LOCK_EX)
