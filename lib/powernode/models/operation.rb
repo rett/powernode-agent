@@ -8,6 +8,8 @@ class Operation
   belongs_to :node_module
   belongs_to :volume
 
+  parse_root_in_json true
+
   Operation::STATUSES.each do |s|
     define_method(s + '?') do
       self.status == s

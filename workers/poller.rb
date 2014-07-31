@@ -7,27 +7,23 @@ require_relative 'agent'
 
 class Poller
   def poll
-    Account.all.each do |account|
-      account.nodes.each do |node|
-        command = 'node_poll'
-        begin
+    begin
+      Account.all.each do |account|
+        account.nodes.each do |node|
+          command = 'node_poll'
           Powernode.logger.info "Queued #{command} for node #{node.id}." if Agent.perform_async({ command: command,
                                                                                                   account_id: account.id,
                                                                                                   node_id: node.id })
-        rescue => e
-          Powernode.logger.error "Exception: #{e.message}."
         end
-      end
-      account.volumes.each do |volume|
-        command = 'volume_poll'
-        begin
+        account.volumes.each do |volume|
+          command = 'volume_poll'
           Powernode.logger.info "Queued #{command} for volume #{volume.id}." if Agent.perform_async({ command: command,
                                                                                                       account_id: account.id,
                                                                                                       volume_id: volume.id })
-        rescue => e
-          Powernode.logger.error "Exception: #{e.message}."
         end
       end
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
     end
     perform_cleanup!
     sleep Powernode.config(:poller_interval)

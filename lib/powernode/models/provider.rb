@@ -13,6 +13,8 @@ class Provider
   delegate :ramdisk_image,      to: :provider_endpoint
   delegate :region,             to: :provider_endpoint
 
+  parse_root_in_json true
+
   def compute
     unless @compute
       begin

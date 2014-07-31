@@ -3,6 +3,8 @@ class VolumeMember
 
   belongs_to :volume
 
+  parse_root_in_json true
+
   after_initialize do
     if device.blank?
       chars = 'fghjkmnp'

@@ -15,6 +15,8 @@ class Node
   delegate :node_architecture, to: :node_template
   delegate :provider_endpoint, to: :provider
 
+  parse_root_in_json true
+
   def cloud_instances
     node_instances.where(variety: 'cloud')
   end

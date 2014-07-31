@@ -7,4 +7,6 @@ class Account
   has_many :notifications
   has_many :operations
   has_many :volumes
+
+  parse_root_in_json true
 end

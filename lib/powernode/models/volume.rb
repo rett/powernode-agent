@@ -7,6 +7,8 @@ class Volume
   has_many   :volume_members
   has_many   :volume_snapshots
 
+  parse_root_in_json true
+
   def volume_member_count
     raid? ? 2 : 1
   end

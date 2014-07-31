@@ -6,4 +6,6 @@ class Notification
   belongs_to :account
 
   attributes :category, :content, :summary
+
+  parse_root_in_json true
 end

@@ -13,6 +13,8 @@ class NodeInstance
 
   attributes :image
 
+  parse_root_in_json true
+
   delegate :provider, to: :node
 
   def boot_config
@@ -37,9 +39,13 @@ class NodeInstance
   def check!
     if instance
       Powernode.logger.info "Updating cloud instance #{id}."
-      self.private_ip_address = instance.private_ip_address
-      self.public_ip_address = instance.public_ip_address
-      self.status = instance.state
+      begin
+        self.private_ip_address = instance.private_ip_address
+        self.public_ip_address = instance.public_ip_address
+        self.status = instance.state
+      rescue => e
+        Powernode.logger.error "Exception: #{e.message}."
+      end
       save if changed?
     else
       self.destroy

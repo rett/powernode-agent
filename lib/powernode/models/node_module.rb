@@ -3,10 +3,12 @@ class NodeModule
 
   belongs_to :account
 
+  parse_root_in_json true
+
   def build!(node_instance)
     if package_spec.empty?
       Powernode.logger.info "Commit aborted: No package specification."
-      account.notifications.create(category: :error, summary: "Commit aborted for module #{id}: No package specification")
+      account.notifications.create(category: :error, summary: "Build aborted for module #{name}: No package specification")
     else
       Powernode.logger.info "Building module #{id} on instance #{node_instance.id}."
       begin
