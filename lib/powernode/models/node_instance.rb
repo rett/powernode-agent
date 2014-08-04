@@ -32,7 +32,13 @@ class NodeInstance
   end
 
   def instance
-    @instance = provider.compute.servers.get(entity) unless @instance
+    unless @instance
+      begin
+        @instance = provider.compute.servers.get(entity)
+      rescue => e
+        Powernode.logger.error "Exception: #{e.message}."
+      end
+    end
     @instance
   end
 
