@@ -1,14 +1,11 @@
 class Notification
-  include PowerNode::ModelExtensions
+  include Her::Model
 
   CATEGORIES = %w[alert error warning information notice]
 
-  def initialize(category, summary, content = '')
-    raise PowerNode::InvalidArgumentError unless Notification::CATEGORIES.include?(category.to_s)
-    @category = category.to_s
-    @summary = summary.to_s
-    @content = content.to_s
-  end
+  belongs_to :account
 
-  attr_accessor :category, :content, :summary
+  attributes :category, :content, :summary
+
+  parse_root_in_json true
 end

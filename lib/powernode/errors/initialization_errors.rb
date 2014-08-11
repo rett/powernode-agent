@@ -1,4 +1,4 @@
-module PowerNode
+module Powernode
   # Array required error
   class ArrayRequiredError < StandardError; end
 

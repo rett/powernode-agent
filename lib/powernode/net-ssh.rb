@@ -1,1 +1,1 @@
-require 'powernode/net-ssh/verbose_exec'
+require_relative 'net-ssh/verbose_exec'
