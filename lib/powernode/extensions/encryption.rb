@@ -42,7 +42,7 @@ module Powernode
 
     def encrypt(data, encryption_cipher = Powernode.config(:encryption_cipher), encryption_key = Powernode.config(:encryption_key))
       data ||= ''
-      if data && data.size > 0 && encryption_cipher && encryption_key && !data.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
+      if data.size > 0 && encryption_cipher && encryption_key && !data.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
         cipher = OpenSSL::Cipher.new(encryption_cipher)
         cipher.encrypt
         cipher.key = encryption_key
