@@ -374,7 +374,6 @@ class NodeInstance
 
   def terminate!
     Powernode.logger.info "Terminating instance #{id}."
-    public_ip_disassociate!
     begin
       self.instance.destroy
       account.notifications.create(category: :notice, summary: "Instance #{name} terminated.")
