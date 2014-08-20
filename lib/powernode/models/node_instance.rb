@@ -46,6 +46,8 @@ class NodeInstance
     unless @ssh_ip_address
       begin
         @ssh_ip_address = instance.ssh_ip_address
+        @ssh_ip_address ||= instance.public_ip_address
+        @ssh_ip_address ||= instance.private_ip_address
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
@@ -291,9 +293,13 @@ class NodeInstance
 
   def public_ip_associate!
     Powernode.logger.info "Associating public IP for instance #{id}."
-    address = provider.compute.addresses.find { |a| a.ip == public_ip_address } if public_ip_address.present?
-    address ||= provider.compute.addresses.find { |a| a.instance_id.nil? }
-    address ||= provider.compute.addresses.create
+    begin
+      address = provider.compute.addresses.find { |a| a.ip == public_ip_address } if public_ip_address.present?
+      address ||= provider.compute.addresses.find { |a| a.instance_id.nil? }
+      address ||= provider.compute.addresses.create
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
+    end
     if address
       begin
         instance.service.associate_address(address.ip)
@@ -307,7 +313,11 @@ class NodeInstance
   end
 
   def public_ip_disassociate!
-    address = self.instance.public_ip_address
+    begin
+      address = self.instance.public_ip_address
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
+    end
     unless address.nil?
       Powernode.logger.info "Disassociating public IP for instance #{id}."
       begin
