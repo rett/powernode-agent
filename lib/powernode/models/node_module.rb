@@ -77,7 +77,7 @@ class NodeModule
           Powernode.logger.error "Exception: #{e.message}."
         end
         begin
-          `sudo rsync -lptgoDH -e "ssh -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{node_instance.ssh_key_file}" --exclude='/*' --files-from=#{tmp_spec.path} #{node_instance.admin_user}@#{node_instance.ssh_ip_address}:/ #{tmp_dir}/`
+          `sudo rsync -lptgoDH -e "ssh -t -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{node_instance.ssh_key_file}" --exclude='/*' --files-from=#{tmp_spec.path} #{node_instance.admin_user}@#{node_instance.ssh_ip_address}:/ #{tmp_dir}/`
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
