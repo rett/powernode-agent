@@ -12,7 +12,7 @@ class NodeModule
     else
       Powernode.logger.info "Building module #{id} on instance #{node_instance.id}."
       begin
-        session = Net::SSH.start(node_instance.private_ip_address,
+        session = Net::SSH.start(node_instance.ssh_ip_address,
                                  node_instance.admin_user,
                                  key_data: node_instance.ssh_key)
       rescue => e
@@ -77,7 +77,7 @@ class NodeModule
           Powernode.logger.error "Exception: #{e.message}."
         end
         begin
-          `sudo rsync -lptgoDH -e "ssh -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{node_instance.ssh_key_file}" --exclude='/*' --files-from=#{tmp_spec.path} #{node_instance.admin_user}@#{node_instance.private_ip_address}:/ #{tmp_dir}/`
+          `sudo rsync -lptgoDH -e "ssh -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{node_instance.ssh_key_file}" --exclude='/*' --files-from=#{tmp_spec.path} #{node_instance.admin_user}@#{node_instance.ssh_ip_address}:/ #{tmp_dir}/`
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end

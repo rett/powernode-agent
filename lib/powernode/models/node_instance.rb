@@ -42,6 +42,17 @@ class NodeInstance
     @instance
   end
 
+  def ssh_ip_address
+    unless @ssh_ip_address
+      begin
+        @ssh_ip_address = instance.ssh_ip_address
+      rescue => e
+        Powernode.logger.error "Exception: #{e.message}."
+      end
+    end
+    @ssh_ip_address
+  end
+
   def check!
     if instance && instance.state != 'terminated'
       Powernode.logger.info "Updating cloud instance #{id}."
@@ -218,7 +229,7 @@ class NodeInstance
   def exec!(command)
     Powernode.logger.info "Executing (#{command}) on #{name}."
     begin
-      session = Net::SSH.start(public_ip_address, node.admin_user, key_data: ssh_key)
+      session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: ssh_key)
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
@@ -342,7 +353,7 @@ class NodeInstance
     Powernode.logger.info "Syncing instance #{id}."
     if private_ip_address && node.ssh_key
       begin
-        session = Net::SSH.start(private_ip_address, node.admin_user, key_data: node.ssh_key)
+        session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: node.ssh_key)
         session.exec!('sudo /usr/sbin/ipn -S')
         account.notifications.create(category: :notice, summary: "Instance #{name} synced.")
       rescue => e
