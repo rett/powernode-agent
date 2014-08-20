@@ -38,21 +38,23 @@ class Agent
       if @node.enabled
         @node.init_sync!
         @node.operations.each do |operation|
-          @operation = operation
-          @node_instance = @node.node_instances.find(@operation.node_instance_id) if @operation.try(:node_instance_id)
-          @node_instance ||= @node.primary_instance
-          @node_module = @node_instance.node_modules.find(@operation.node_module_id) if @operation.try(:node_module_id)
-          if @operation.pending? && (!@operation.scheduled_at || Time.parse(@operation.scheduled_at) < Time.now)
-            @operation.running!
-            self.send("do_#{@operation.command}") if self.respond_to?("do_#{@operation.command}")
-            @operation.complete!
-          elsif @operation.running?
-            @account.notifications.create(category: :error, summary: "#{@operation.description} failed unexpectedly!")
-            @operation.failed!
-          elsif @operation.failed?
-            @operation.complete!
+          if (@operation = @node.operations.find(operation.id).first)
+            @node_instance = @node.node_instances.find(@operation.node_instance_id) if @operation.try(:node_instance_id)
+            @node_instance ||= @node.primary_instance
+            @node_module = @node_instance.node_modules.find(@operation.node_module_id) if @operation.try(:node_module_id)
+            if @operation.pending? && (!@operation.scheduled_at || Time.parse(@operation.scheduled_at) < Time.now)
+              @operation.running!
+              self.send("do_#{@operation.command}") if self.respond_to?("do_#{@operation.command}")
+              @operation.complete!
+            elsif @operation.running?
+              @account.notifications.create(category: :error, summary: "#{@operation.description} failed unexpectedly!")
+              @operation.failed!
+            elsif @operation.failed?
+              @operation.complete!
+            end
           end
         end
+
         Powernode.logger.info "Performing cloud instance check for node #{@node.id}."
         @node.cloud_instances.each do |node_instance|
           node_instance.check!
