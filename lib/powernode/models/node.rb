@@ -50,7 +50,6 @@ class Node
       end
       if @key && @key.fingerprint == ssh_key_fingerprint && File.exist?(ssh_key_file)
         Powernode.logger.info "Found valid key for node #{id}."
-      elsif @key
       else
         begin
           Powernode.logger.info "Creating new key for node #{id}."
@@ -148,7 +147,7 @@ class Node
         node_instance.provider_id = provider.id
         node_instance.public_ip_address = cloud_instance.public_ip_address
         node_instance.status = cloud_instance.state
-        node_instance.started_at = cloud_instance.created_at
+        node_instance.started_at = cloud_instance.respond_to?(:created_at) ? cloud_instance.created_at : cloud_instance.created
         if node_instance.save
           Powernode.logger.info "Created instance #{cloud_instance.id}."
         else
