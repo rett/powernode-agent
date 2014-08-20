@@ -123,17 +123,18 @@ class Node
       else
         flavor = node_instance_type.name
       end
-      instance_options = { name: node_instance.id,
-                           user_data: node_instance.config,
-                           availability_zone: provider.availability_zone,
-                           image_id: provider.machine_image,
-                           image_ref: provider.machine_image,
-                           kernel_id: provider.kernel_image,
-                           ramdisk_id: provider.ramdisk_image,
-                           flavor_id: flavor,
-                           flavor_ref: flavor,
-                           region: provider.region,
-                           key_name: key.name }
+      instance_options = {}
+      instance_options[:name]               = node_instance.id
+      instance_options[:user_data]          = node_instance.config
+      instance_options[:availability_zone]  = provider.availability_zone  if provider.availability_zone.present?
+      instance_options[:image_id]           = provider.machine_image      if provider.machine_image.present?
+      instance_options[:image_ref]          = provider.machine_image      if provider.machine_image.present?
+      instance_options[:kernel_id]          = provider.kernel_image       if provider.kernel_image.present?
+      instance_options[:ramdisk_id]         = provider.ramdisk_image      if provider.ramdisk_image.present?
+      instance_options[:region]             = provider.region             if provider.region.present?
+      instance_options[:flavor_id]          = flavor
+      instance_options[:flavor_ref]         = flavor
+      instance_options[:key_name]           = key.name
       begin
         cloud_instance = provider.compute.servers.create(instance_options)
         cloud_instance.wait_for { ready? }
@@ -147,7 +148,7 @@ class Node
         node_instance.provider_id = provider.id
         node_instance.public_ip_address = cloud_instance.public_ip_address
         node_instance.status = cloud_instance.state
-        node_instance.started_at = cloud_instance.created
+        node_instance.started_at = cloud_instance.created_at
         if node_instance.save
           Powernode.logger.info "Created instance #{cloud_instance.id}."
         else

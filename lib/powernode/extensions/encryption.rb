@@ -11,7 +11,7 @@ module Powernode
 
     def decryption_init
       update_server = false
-      (Powernode.config('encrypted_attributes') & attributes.keys).each do |attribute|
+      (Powernode.config(:encrypted_attributes) & attributes.keys).each do |attribute|
         define_singleton_method(attribute) { decrypt(attributes[attribute]) }
         update_server = true unless attributes[attribute] && attributes[attribute].match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
       end
@@ -19,12 +19,12 @@ module Powernode
     end
 
     def encryption_init
-      (Powernode.config('encrypted_attributes') & attributes.keys).each do |attribute|
+      (Powernode.config(:encrypted_attributes) & attributes.keys).each do |attribute|
         attributes[attribute] = encrypt(attributes[attribute])
       end
     end
 
-    def decrypt(data, encryption_cipher = Powernode.config('encryption_cipher'), encryption_key = Powernode.config('encryption_key'))
+    def decrypt(data, encryption_cipher = Powernode.config(:encryption_cipher), encryption_key = Powernode.config(:encryption_key))
       data ||= ''
       if data.size > 0 && encryption_cipher && encryption_key && data.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
         cipher = OpenSSL::Cipher.new(encryption_cipher)
@@ -40,9 +40,9 @@ module Powernode
       decrypted_data
     end
 
-    def encrypt(data, encryption_cipher = Powernode.config('encryption_cipher'), encryption_key = Powernode.config('encryption_key'))
+    def encrypt(data, encryption_cipher = Powernode.config(:encryption_cipher), encryption_key = Powernode.config(:encryption_key))
       data ||= ''
-      if data && data.size > 0 && encryption_cipher && encryption_key && !data.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
+      if data.size > 0 && encryption_cipher && encryption_key && !data.match(/\A#{Regexp.escape(Powernode.config(:encryption_prefix))}*/)
         cipher = OpenSSL::Cipher.new(encryption_cipher)
         cipher.encrypt
         cipher.key = encryption_key

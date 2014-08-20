@@ -43,7 +43,7 @@ class NodeInstance
   end
 
   def check!
-    if instance
+    if instance && instance.state != 'terminated'
       Powernode.logger.info "Updating cloud instance #{id}."
       begin
         self.private_ip_address = instance.private_ip_address
@@ -284,8 +284,12 @@ class NodeInstance
     address ||= provider.compute.addresses.find { |a| a.instance_id.nil? }
     address ||= provider.compute.addresses.create
     if address
-      instance.associate_address(address.ip)
-      self.public_ip_address = address.ip
+      begin
+        instance.service.associate_address(address.ip)
+        self.public_ip_address = address.ip
+      rescue => e
+        Powernode.logger.error "Exception: #{e.message}."
+      end
       save
       account.notifications.create(category: :notice, summary: "Associated IP for instance #{name}.")
     end
@@ -295,7 +299,11 @@ class NodeInstance
     address = self.instance.public_ip_address
     unless address.nil?
       Powernode.logger.info "Disassociating public IP for instance #{id}."
-      instance.disassociate_address(public_ip_address)
+      begin
+        instance.service.disassociate_address(public_ip_address)
+      rescue => e
+        Powernode.logger.error "Exception: #{e.message}."
+      end
       account.notifications.create(category: :notice, summary: "Disassociated IP from instance #{name}.")
     end
   end
