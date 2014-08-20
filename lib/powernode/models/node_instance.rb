@@ -136,7 +136,6 @@ class NodeInstance
       module_file_name = "#{node_module.id}-#{node_module.data_file_version}.#{node.module_extension}"
       module_file = File.join(tmp_dir, Powernode.config(:store_dir), module_file_name)
       response = Powernode.server.get("node_modules/#{node_module.id}/download/data.html")
-      Powernode.logger.info "DOWNLOAD STATUS: #{response.status}"
       if response.status == 200
         begin
           File.open(module_file, File::RDWR|File::CREAT, 0644) do |f|
@@ -180,28 +179,29 @@ class NodeInstance
       File.open(volume_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
         f.flock(File::LOCK_EX)
         f.puts("INIT=initialize.sh") if node.init_script_id
-        f.puts("STORE=#{Powernode.config(:store_dir)}")
       end
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
-    image_file = Tempfile.new(["#{id}", '.img'])
     case image_format
-      # when 'img'
-      #   begin
-      #     image_file_size = `sudo du -bs #{tmp_dir} | cut -f1`.to_i + Powernode.config(:image_padding)
-      #     image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
-      #     tmp_dir_mount = Dir.mktmpdir
-      #     system *%W[sudo dd if=/dev/zero of=#{image_file.path} bs=#{Powernode.config(:image_blocksize).to_i} count=#{image_file_blocks}]
-      #     system *%W[sudo mkfs.ext4 -F #{image_file.path}]
-      #     system *%W[sudo mount -o loop #{image_file.path} #{tmp_dir_mount}]
-      #     system *%W[sudo cp -a #{File.join(tmp_dir, '*')} #{tmp_dir_mount}]
-      #     system *%W[sudo extlinux --install #{tmp_dir_mount}]
-      #     system *%W[sudo umount #{tmp_dir_mount}]
-      #     FileUtils.remove_entry_secure(tmp_dir_mount)
-      #   rescue => e
-      #     Powernode.logger.error "Exception: #{e.message}."
-      #   end
+    when 'img'
+      begin
+        image_file = Tempfile.new(["#{id}", '.img'])
+        image_file_size = `sudo du -bs #{tmp_dir} | cut -f1`.to_i + Powernode.config(:image_padding)
+        image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
+        tmp_dir_mount = Dir.mktmpdir
+        system *%W[sudo dd if=/dev/zero of=#{image_file.path} bs=#{Powernode.config(:image_blocksize).to_i} count=#{image_file_blocks}]
+        system *%W[sudo mkfs.ext4 -F #{image_file.path}]
+        system *%W[sudo mount -o loop #{image_file.path} #{tmp_dir_mount}]
+        tmp_dir_device = `sudo losetup -j #{image_file.path}`.split(':').first
+        system *%W[sudo cp -a #{File.join(tmp_dir, '.')} #{tmp_dir_mount}]
+        system *%W[sudo dd bs=440 conv=notrunc count=1 if=/usr/lib/syslinux/mbr.bin of=#{tmp_dir_device}]
+        system *%W[sudo extlinux --install #{tmp_dir_mount}]
+        system *%W[sudo umount -l #{tmp_dir_device}]
+        FileUtils.remove_entry_secure(tmp_dir_mount)
+      rescue => e
+        Powernode.logger.error "Exception: #{e.message}."
+      end
     when 'iso'
       begin
         FileUtils.cp(File.join(init_dir, 'isolinux.bin'), File.join(tmp_dir))
@@ -209,13 +209,14 @@ class NodeInstance
         Powernode.logger.error "Exception: #{e.message}."
       end
       begin
+        image_file = Tempfile.new(["#{id}", '.img'])
         system *%W[sudo mkisofs -o #{image_file.path} -V #{name} -b isolinux.bin -c syslinux/boot.cat -r -J -l -quiet -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}]
         system *%W[sudo isohybrid #{image_file.path} --entry 1 --type 0x83]
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
     end
-    if image_file.size > 0
+    if image_file && image_file.size > 0
       payload = { image_format: image_format, image: Faraday::UploadIO.new(image_file.path, 'application/octet-stream') }
       response = Powernode.server.post("node_instances/#{id}/upload/image", payload)
       if response.status == 200
