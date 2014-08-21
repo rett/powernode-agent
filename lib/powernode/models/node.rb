@@ -124,7 +124,7 @@ class Node
       end
       instance_options = {}
       instance_options[:name]               = node_instance.id
-      instance_options[:user_data]          = node_instance.config
+      instance_options[:user_data]          = node_instance.identity
       instance_options[:availability_zone]  = provider.availability_zone  if provider.availability_zone.present?
       instance_options[:image_id]           = provider.machine_image      if provider.machine_image.present?
       instance_options[:image_ref]          = provider.machine_image      if provider.machine_image.present?

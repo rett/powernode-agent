@@ -18,6 +18,7 @@ log_level: debug
 tmp_dir: /opt/powernode/agent/tmp
 
 # SMTP options
+smtp_admin_email: admin@nodealchemy.com
 smtp_from_email: support@nodealchemy.com
 smtp_method: smtp
 smtp_server: mail.powernode.net
