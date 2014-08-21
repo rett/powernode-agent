@@ -17,18 +17,18 @@ class NodeInstance
 
   delegate :provider, to: :node
 
-  def boot_config
-    "ID=#{id} " +
-    "KEY=#{agent_key} " +
-    "SERVER=#{node.proxy_url.present? ? node.proxy_url : Powernode.config(:server_url)}/api/node_v1 "
-  end
-
   def identity
     <<-EOF.strip_heredoc
       ID=#{id}
       KEY=#{agent_key}
       SERVER=#{node.proxy_url.present? ? node.proxy_url : Powernode.config(:server_url)}/api/node_v1
     EOF
+  end
+
+  def identity_parameters
+    "ID=#{id} " +
+    "KEY=#{agent_key} " +
+    "SERVER=#{node.proxy_url.present? ? node.proxy_url : Powernode.config(:server_url)}/api/node_v1 "
   end
 
   def instance
@@ -222,7 +222,7 @@ class NodeInstance
               "LABEL alchemy\n" +
               "LINUX /boot/#{kernel_file_name}\n" +
               "INITRD /boot/#{ramdisk_file_name}\n" +
-              "APPEND #{boot_config} "
+              "APPEND #{identity_parameters} "
             if private_ip_static
               f << "ip=" +
                 "#{private_ip_address}:" +
