@@ -65,7 +65,7 @@ when 'smtp'
                                   domain:               Powernode.config(:smtp_domain),
                                   user_name:            Powernode.config(:smtp_user_name),
                                   password:             Powernode.config(:smtp_password),
-                                  authentication:       Powernode.config(:smtp_authentication).to_sym,
+                                  authentication:       Powernode.config(:smtp_authentication),
                                   enable_starttls_auto: Powernode.config(:smtp_enable_starttls_auto) } }
 end
 
