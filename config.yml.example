@@ -11,7 +11,6 @@ instance_key_length: 32
 log_cycle: daily
 data_expiration: 0:30:00
 image_blocksize: 1024
-image_padding: 10485760
 init_dir: /opt/powernode/init
 log_dir: /opt/powernode/agent/log
 log_file: powernode.log
@@ -19,6 +18,7 @@ log_level: debug
 tmp_dir: /opt/powernode/agent/tmp
 
 # SMTP options
+smtp_admin_email: admin@nodealchemy.com
 smtp_from_email: support@nodealchemy.com
 smtp_method: smtp
 smtp_server: mail.powernode.net

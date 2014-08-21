@@ -17,18 +17,18 @@ class NodeInstance
 
   delegate :provider, to: :node
 
-  def boot_config
-    "ID=#{id} " +
-    "KEY=#{agent_key} " +
-    "SERVER=#{node.proxy_url.present? ? node.proxy_url : Powernode.config(:server_url)}/api/node_v1 "
-  end
-
-  def config
-    <<-EOF.strip_heredoc + (attributes['config'].present? ? attributes['config'] : '')
+  def identity
+    <<-EOF.strip_heredoc
       ID=#{id}
       KEY=#{agent_key}
       SERVER=#{node.proxy_url.present? ? node.proxy_url : Powernode.config(:server_url)}/api/node_v1
     EOF
+  end
+
+  def identity_parameters
+    "ID=#{id} " +
+    "KEY=#{agent_key} " +
+    "SERVER=#{node.proxy_url.present? ? node.proxy_url : Powernode.config(:server_url)}/api/node_v1 "
   end
 
   def instance
@@ -85,20 +85,27 @@ class NodeInstance
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
+    FileUtils.mkdir_p(File.join(tmp_dir, 'boot'))
     begin
-      FileUtils.cp(File.join(init_dir, "#{node.node_architecture.id}.kernel"), File.join(tmp_dir, 'kernel'))
-      FileUtils.cp(File.join(init_dir, "#{node.node_architecture.id}.ramdisk"), File.join(tmp_dir, 'ramdisk'))
+      FileUtils.cp(File.join(init_dir, "#{node.node_architecture.id}.kernel"), File.join(tmp_dir, 'boot', 'kernel'))
+      FileUtils.cp(File.join(init_dir, "#{node.node_architecture.id}.ramdisk"), File.join(tmp_dir, 'boot', 'ramdisk'))
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
+    node_identity_file = File.join(tmp_dir, 'identity.cfg')
     begin
-      FileUtils.mkdir_p(File.join(tmp_dir, Powernode.config(:store_dir)))
+      File.open(node_identity_file, File::RDWR|File::CREAT, 0644) do |f|
+        f.flock(File::LOCK_EX)
+        f.puts(identity)
+        f.flush
+        f.truncate(f.pos)
+      end
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
-    node_cfg_file = File.join(tmp_dir, 'node.cfg')
+    node_config_file = File.join(tmp_dir, 'node.cfg')
     begin
-      File.open(node_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
+      File.open(node_config_file, File::RDWR|File::CREAT, 0644) do |f|
         f.flock(File::LOCK_EX)
         f.puts(config)
         f.flush
@@ -107,15 +114,15 @@ class NodeInstance
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
-    FileUtils.mkdir_p(File.join(tmp_dir, 'syslinux'))
-    syslinux_cfg_file = File.join(tmp_dir, 'syslinux', 'syslinux.cfg')
+    FileUtils.mkdir_p(File.join(tmp_dir, 'boot', 'syslinux'))
+    syslinux_cfg_file = File.join(tmp_dir, 'boot', 'syslinux', 'syslinux.cfg')
     begin
       File.open(syslinux_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
         f.flock(File::LOCK_EX)
         f << "DEFAULT alchemy\n" +
             "LABEL alchemy\n" +
-            "LINUX /kernel\n" +
-            "INITRD /ramdisk\n"
+            "LINUX /boot/kernel\n" +
+            "INITRD /boot/ramdisk\n"
         if private_ip_static
           f << "APPEND ip=#{private_ip_address}:" +
               ":" +
@@ -132,90 +139,40 @@ class NodeInstance
         f.truncate(f.pos)
       end
     end
-    node_modules.each do |node_module|
-      module_file_name = "#{node_module.id}-#{node_module.data_file_version}.#{node.module_extension}"
-      module_file = File.join(tmp_dir, Powernode.config(:store_dir), module_file_name)
-      response = Powernode.server.get("node_modules/#{node_module.id}/download/data.html")
-      Powernode.logger.info "DOWNLOAD STATUS: #{response.status}"
-      if response.status == 200
-        begin
-          File.open(module_file, File::RDWR|File::CREAT, 0644) do |f|
-            f.flock(File::LOCK_EX)
-            f.write(response.body)
-          end
-        rescue => e
-          Powernode.logger.error "Exception: #{e.message}."
-        end
-      end
-      module_info_file_name = "#{node_module.id}-#{node_module.data_file_version}.#{node.module_info_extension}"
-      module_info = File.join(tmp_dir, Powernode.config(:store_dir), module_info_file_name)
-      response = Powernode.server.get("node_modules/#{node_module.id}/download/info.text")
-      if response.status == 200
-        begin
-          File.open(module_info, File::RDWR|File::CREAT, 0644) do |f|
-            f.flock(File::LOCK_EX)
-            f.write(response.body)
-          end
-        rescue => e
-          Powernode.logger.error "Exception: #{e.message}."
-        end
-      end
-    end
-    if node.init_script_id
-      init_script_file = File.join(tmp_dir, 'initialize.sh')
-      response = Powernode.server.get("scripts/#{node.init_script_id}/download")
-      if response.status == 200
-        begin
-          File.open(init_script_file, File::RDWR|File::CREAT, 0644) do |f|
-            f.flock(File::LOCK_EX)
-            f.write(response.body)
-          end
-        rescue => e
-          Powernode.logger.error "Exception: #{e.message}."
-        end
-      end
-    end
-    volume_cfg_file = File.join(tmp_dir, 'volume.cfg')
-    begin
-      File.open(volume_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
-        f.flock(File::LOCK_EX)
-        f.puts("INIT=initialize.sh") if node.init_script_id
-        f.puts("STORE=#{Powernode.config(:store_dir)}")
-      end
-    rescue => e
-      Powernode.logger.error "Exception: #{e.message}."
-    end
-    image_file = Tempfile.new(["#{id}", '.img'])
     case image_format
-      # when 'img'
-      #   begin
-      #     image_file_size = `sudo du -bs #{tmp_dir} | cut -f1`.to_i + Powernode.config(:image_padding)
-      #     image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
-      #     tmp_dir_mount = Dir.mktmpdir
-      #     system *%W[sudo dd if=/dev/zero of=#{image_file.path} bs=#{Powernode.config(:image_blocksize).to_i} count=#{image_file_blocks}]
-      #     system *%W[sudo mkfs.ext4 -F #{image_file.path}]
-      #     system *%W[sudo mount -o loop #{image_file.path} #{tmp_dir_mount}]
-      #     system *%W[sudo cp -a #{File.join(tmp_dir, '*')} #{tmp_dir_mount}]
-      #     system *%W[sudo extlinux --install #{tmp_dir_mount}]
-      #     system *%W[sudo umount #{tmp_dir_mount}]
-      #     FileUtils.remove_entry_secure(tmp_dir_mount)
-      #   rescue => e
-      #     Powernode.logger.error "Exception: #{e.message}."
-      #   end
+    when 'img'
+      begin
+        image_file = Tempfile.new(["#{id}", '.img'])
+        image_file_size = (`sudo du -bs #{tmp_dir} | cut -f1`.to_i * 1.15).to_i
+        image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
+        tmp_dir_mount = Dir.mktmpdir
+        system *%W[sudo dd if=/dev/zero of=#{image_file.path} bs=#{Powernode.config(:image_blocksize).to_i} count=#{image_file_blocks}]
+        system *%W[sudo mkfs.ext4 -F #{image_file.path}]
+        system *%W[sudo mount -o loop #{image_file.path} #{tmp_dir_mount}]
+        tmp_dir_device = `sudo losetup -j #{image_file.path}`.split(':').first
+        system *%W[sudo cp -a #{File.join(tmp_dir, '.')} #{tmp_dir_mount}]
+        system *%W[sudo dd bs=440 conv=notrunc count=1 if=#{File.join(init_dir, 'mbr.bin')} of=#{tmp_dir_device}]
+        system *%W[sudo extlinux --install #{tmp_dir_mount}/boot]
+        system *%W[sudo umount -l #{tmp_dir_device}]
+        FileUtils.remove_entry_secure(tmp_dir_mount)
+      rescue => e
+        Powernode.logger.error "Exception: #{e.message}."
+      end
     when 'iso'
       begin
-        FileUtils.cp(File.join(init_dir, 'isolinux.bin'), File.join(tmp_dir))
+        FileUtils.cp(File.join(init_dir, 'isolinux.bin'), File.join(tmp_dir, 'boot'))
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
       begin
-        system *%W[sudo mkisofs -o #{image_file.path} -V #{name} -b isolinux.bin -c syslinux/boot.cat -r -J -l -quiet -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}]
+        image_file = Tempfile.new(["#{id}", '.img'])
+        system *%W[sudo mkisofs -o #{image_file.path} -V #{name} -b boot/isolinux.bin -c boot/syslinux/boot.cat -r -J -l -quiet -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}]
         system *%W[sudo isohybrid #{image_file.path} --entry 1 --type 0x83]
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
     end
-    if image_file.size > 0
+    if image_file && image_file.size > 0
       payload = { image_format: image_format, image: Faraday::UploadIO.new(image_file.path, 'application/octet-stream') }
       response = Powernode.server.post("node_instances/#{id}/upload/image", payload)
       if response.status == 200
@@ -263,9 +220,9 @@ class NodeInstance
             f << "# Updated: #{updated_at}\n" +
               "DEFAULT alchemy\n" +
               "LABEL alchemy\n" +
-              "LINUX /#{kernel_file_name}\n" +
-              "INITRD /#{ramdisk_file_name}\n" +
-              "APPEND #{boot_config} "
+              "LINUX /boot/#{kernel_file_name}\n" +
+              "INITRD /boot/#{ramdisk_file_name}\n" +
+              "APPEND #{identity_parameters} "
             if private_ip_static
               f << "ip=" +
                 "#{private_ip_address}:" +
@@ -374,7 +331,6 @@ class NodeInstance
 
   def terminate!
     Powernode.logger.info "Terminating instance #{id}."
-    public_ip_disassociate!
     begin
       self.instance.destroy
       account.notifications.create(category: :notice, summary: "Instance #{name} terminated.")
