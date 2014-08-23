@@ -35,6 +35,7 @@ class NodeInstance
     unless @instance
       begin
         @instance = provider.compute.servers.get(entity)
+        self.status = 'terminated' unless @instance
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
@@ -66,10 +67,10 @@ class NodeInstance
         Powernode.logger.error "Exception: #{e.message}."
       end
       save if changed?
-      case status
-      when 'terminated'
-        self.destroy
-      end
+    end
+    case status
+    when 'terminated'
+      self.destroy
     end
   end
 
