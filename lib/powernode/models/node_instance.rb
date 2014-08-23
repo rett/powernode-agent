@@ -35,6 +35,7 @@ class NodeInstance
     unless @instance
       begin
         @instance = provider.compute.servers.get(entity)
+        self.status = 'terminated' unless @instance
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
@@ -56,7 +57,7 @@ class NodeInstance
   end
 
   def check!
-    if instance && instance.state != 'terminated'
+    if instance
       Powernode.logger.info "Updating cloud instance #{id}."
       begin
         self.private_ip_address = instance.private_ip_address
@@ -66,7 +67,9 @@ class NodeInstance
         Powernode.logger.error "Exception: #{e.message}."
       end
       save if changed?
-    else
+    end
+    case status
+    when 'terminated'
       self.destroy
     end
   end
@@ -192,11 +195,20 @@ class NodeInstance
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
+    response = ''
     begin
-      session.exec!("sudo #{command}") if session
+      session.open_channel do |channel|
+        channel.exec("sudo #{command}") do |ch, success|
+          channel.on_data do |ch, data|
+            response = data
+          end
+        end
+      end
+      session.loop
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
+    response
   end
 
   def netboot_sync!

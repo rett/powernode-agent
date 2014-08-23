@@ -22,13 +22,14 @@ class Agent
     if (@volume = Volume.find(@job['volume_id']))
       Powernode.logger.info "Polling volume #{@volume.id}."
       case @volume.status
+      when 'attached', 'available'
+        @volume.check!
       when 'migrating'
         @volume.recover!
-      when 'pending'
+      when 'pending', 'provisioning'
         @volume.provision!
-      when 'ready'
-        @volume.check!
       end
+      Powernode.logger.info "Polling complete for volume #{@volume.id}."
     end
   end
 
