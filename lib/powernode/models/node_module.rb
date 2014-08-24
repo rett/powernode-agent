@@ -51,7 +51,7 @@ class NodeModule
   end
 
   def commit!(node_instance)
-    if effective_spec.empty?
+    if rsync_spec.empty?
       Powernode.logger.info "Commit aborted: No module specification."
       account.notifications.create(category: :error, summary: "Commit aborted for module #{name}: No module specification")
     else
@@ -59,16 +59,13 @@ class NodeModule
       tmp_dir = Dir.mktmpdir("#{id}")
       FileUtils.chmod(0755, tmp_dir)
       begin
-        tmp_spec = Tempfile.new(["#{id}", '.spec'])
+        tmp_spec = Tempfile.new([id, '.spec'])
         File.open(tmp_spec, File::RDWR|File::CREAT, 0644) do |f|
           f.flock(File::LOCK_EX)
-          self.effective_spec.each do |l|
-            f.write(Base64.decode64(l) + "\n")
-          end
+          f.write(rsync_spec)
         end
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
-        FileUtils.remove_entry_secure(tmp_dir, force: true)
       end
       if File.directory?(tmp_dir)
         begin
@@ -77,7 +74,7 @@ class NodeModule
           Powernode.logger.error "Exception: #{e.message}."
         end
         begin
-          `sudo rsync -lptgoDH --numeric-ids -e "ssh -t -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{node_instance.ssh_key_file}" --exclude='/*' --files-from=#{tmp_spec.path} #{node_instance.admin_user}@#{node_instance.ssh_ip_address}:/ #{tmp_dir}/`
+          system %Q[sudo rsync -arqH --numeric-ids -e "ssh -t -q -p #{Powernode.config(:ssh_port)} -o StrictHostKeyChecking=no -i #{node_instance.ssh_key_file}" --include-from=#{tmp_spec.path} #{node_instance.admin_user}@#{node_instance.ssh_ip_address}:/ #{tmp_dir}/]
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
