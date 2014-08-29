@@ -88,9 +88,9 @@ class NodeModule
           system *%W[sudo rm -rf #{tmp_dir}]
         end
       end
+      tmp_spec.unlink
       if File.directory?(tmp_dir)
         tmp_module = Tempfile.new([id, '.mo'])
-        tmp_module.close
         begin
           system *%W[sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config(:module_compression)} -noappend -no-progress]
         rescue => e
@@ -115,6 +115,7 @@ class NodeModule
           system *%W[sudo rm -rf #{tmp_dir}]
           Powernode.logger.error "Commit aborted for module #{id}."
         end
+        tmp_module.unlink
       else
         Powernode.logger.error "Commit aborted for module #{id}."
       end
