@@ -89,7 +89,7 @@ class NodeModule
         end
       end
       if File.directory?(tmp_dir)
-        tmp_module = Tempfile.new(["module-#{id}", '.mo'])
+        tmp_module = Tempfile.new([id, '.mo'])
         tmp_module.close
         begin
           system *%W[sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config(:module_compression)} -noappend -no-progress]
