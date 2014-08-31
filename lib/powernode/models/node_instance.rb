@@ -330,7 +330,7 @@ class NodeInstance
 
   def sync!
     Powernode.logger.info "Syncing instance #{id}."
-    if status == 'active' && ssh_ip_address && node.key
+    if ssh_ip_address && node.key
       begin
         session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: node.ssh_key)
         session.exec!('sudo /usr/sbin/ipn -S')
