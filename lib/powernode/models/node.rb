@@ -39,21 +39,18 @@ class Node
 
   def key
     unless @key
-      keypair_name = id
-      keys = []
       begin
         Powernode.logger.info "Retrieving keypairs for node #{id}."
-        keys = provider.compute.key_pairs.all
-        @key = keys.select { |k| k.name == keypair_name }.first
+        @key = provider.compute.key_pairs.all.select { |k| k.name == id }.first
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
-      if @key && @key.fingerprint == ssh_key_fingerprint && File.exist?(ssh_key_file)
+      if @key && @key.fingerprint == ssh_key_fingerprint && ssh_key_file
         Powernode.logger.info "Found valid key for node #{id}."
       else
         begin
           Powernode.logger.info "Creating new key for node #{id}."
-          @key = provider.compute.key_pairs.create(name: keypair_name)
+          @key = provider.compute.key_pairs.create(name: id)
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
@@ -69,16 +66,12 @@ class Node
   end
 
   def ssh_key_file
-    key_dir = Powernode.config(:ssh_key_dir)
-    key_file = File.join(key_dir, "#{id}.pem")
-    unless File.exist?(key_file)
-      FileUtils.mkdir_p(key_dir)
-      File.open(key_file, File::RDWR|File::CREAT, 0600) do |f|
-        f.flock(File::LOCK_EX)
-        f.write(ssh_key)
-        f.flush
-        f.truncate(f.pos)
-      end
+    key_file = File.join(Powernode.config(:ssh_key_dir), "#{id}.pem")
+    File.open(key_file, File::RDWR|File::CREAT, 0600) do |f|
+      f.flock(File::LOCK_EX)
+      f.write(ssh_key)
+      f.flush
+      f.truncate(f.pos)
     end
     key_file
   end

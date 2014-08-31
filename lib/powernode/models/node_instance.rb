@@ -330,11 +330,11 @@ class NodeInstance
 
   def sync!
     Powernode.logger.info "Syncing instance #{id}."
-    if private_ip_address && node.ssh_key
+    if status == 'active' && ssh_ip_address && node.key
       begin
         session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: node.ssh_key)
         session.exec!('sudo /usr/sbin/ipn -S')
-        account.notifications.create(category: :notice, summary: "Instance #{name} syncing.")
+        account.notifications.create(category: :notice, summary: "Instance #{name} synced.")
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
