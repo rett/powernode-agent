@@ -1,4 +1,5 @@
 :verbose: false
 :concurrency:  5
+:logfile: /var/log/powernode/agent.log
 :queues:
   - [agent, 10]
