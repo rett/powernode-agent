@@ -302,7 +302,7 @@ class NodeInstance
     Powernode.logger.info "Rebooting instance #{id}."
     begin
       instance.reboot
-      account.notifications.create(category: :notice, summary: "Instance #{name} rebooted.")
+      account.notifications.create(category: :notice, summary: "Instance #{name} rebooting.")
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
@@ -312,7 +312,7 @@ class NodeInstance
     Powernode.logger.info "Starting instance #{id}."
     begin
       instance.start
-      account.notifications.create(category: :notice, summary: "Instance #{name} started.")
+      account.notifications.create(category: :notice, summary: "Instance #{name} starting.")
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
@@ -322,7 +322,7 @@ class NodeInstance
     Powernode.logger.info "Stopping instance #{id}."
     begin
       instance.stop
-      account.notifications.create(category: :notice, summary: "Instance #{name} stopped.")
+      account.notifications.create(category: :notice, summary: "Instance #{name} stopping.")
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
@@ -330,7 +330,7 @@ class NodeInstance
 
   def sync!
     Powernode.logger.info "Syncing instance #{id}."
-    if private_ip_address && node.ssh_key
+    if ssh_ip_address && node.key
       begin
         session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: node.ssh_key)
         session.exec!('sudo /usr/sbin/ipn -S')
@@ -345,7 +345,7 @@ class NodeInstance
     Powernode.logger.info "Terminating instance #{id}."
     begin
       self.instance.destroy
-      account.notifications.create(category: :notice, summary: "Instance #{name} terminated.")
+      account.notifications.create(category: :notice, summary: "Instance #{name} terminating.")
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end

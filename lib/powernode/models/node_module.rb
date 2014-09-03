@@ -9,6 +9,9 @@ class NodeModule
     if package_spec.empty?
       Powernode.logger.info "Commit aborted: No package specification."
       account.notifications.create(category: :error, summary: "Build aborted for module #{name}: No package specification")
+    elsif lock_spec?
+      Powernode.logger.info "Commit aborted: Spec locked."
+      account.notifications.create(category: :error, summary: "Build aborted for module #{name}: Spec locked")
     else
       Powernode.logger.info "Building module #{id} on instance #{node_instance.id}."
       begin
@@ -88,9 +91,9 @@ class NodeModule
           system *%W[sudo rm -rf #{tmp_dir}]
         end
       end
+      tmp_spec.unlink
       if File.directory?(tmp_dir)
-        tmp_module = Tempfile.new(["module-#{id}", '.mo'])
-        tmp_module.close
+        tmp_module = Tempfile.new([id, '.mo'])
         begin
           system *%W[sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config(:module_compression)} -noappend -no-progress]
         rescue => e
@@ -115,6 +118,7 @@ class NodeModule
           system *%W[sudo rm -rf #{tmp_dir}]
           Powernode.logger.error "Commit aborted for module #{id}."
         end
+        tmp_module.unlink
       else
         Powernode.logger.error "Commit aborted for module #{id}."
       end

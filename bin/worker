@@ -3,7 +3,6 @@
 NAME="$(basename $0)"
 BASEDIR="$(dirname $0)/.."
 CFGFILE="${BASEDIR}/${NAME}.yml"
-LOGFILE="${BASEDIR}/log/${NAME}.log"
 WORKER="${BASEDIR}/workers/${NAME}.rb"
 PIDFILE="${BASEDIR}/tmp/pids/${NAME}.pid"
 
@@ -45,7 +44,7 @@ pool_run()
   pool_getpid
   if [ ! "${PID}" ]; then
     echo "Running ${NAME} pool..."
-    bundle exec sidekiq -v -C "${CFGFILE}" -P "${PIDFILE}" -r ${WORKER}
+    sidekiq -v -C "${CFGFILE}" -P "${PIDFILE}" -r ${WORKER}
   fi
 }
 
@@ -55,7 +54,7 @@ pool_start()
   pool_getpid
   if [ ! "${PID}" ]; then
     echo "Starting ${NAME} pool..."
-    bundle exec sidekiq -C "${CFGFILE}" -L "${LOGFILE}" -P "${PIDFILE}" -r "${WORKER}" -d
+    sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r "${WORKER}" -d
     while [ ! -f "${PIDFILE}" ]; do
       pool_getpid
       sleep 1
