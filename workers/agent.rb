@@ -37,7 +37,6 @@ class Agent
     if (@node = Node.find(@job['node_id']))
       Powernode.logger.info "Polling node #{@node.id}."
       if @node.enabled
-        @node.init_sync!
         @node.operations.each do |operation|
           if (@operation = @node.operations.find(operation.id).first)
             @node_instance = @node.node_instances.find(@operation.node_instance_id) if @operation.try(:node_instance_id)
