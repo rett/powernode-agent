@@ -154,7 +154,7 @@ class NodeInstance
         system *%W[sudo mount -o loop #{image_file.path} #{tmp_dir_mount}]
         tmp_dir_device = `sudo losetup -j #{image_file.path}`.split(':').first
         system *%W[sudo cp -a #{File.join(tmp_dir, '.')} #{tmp_dir_mount}]
-        system *%W[sudo dd bs=440 conv=notrunc count=1 if=#{File.join(init_dir, 'mbr.bin')} of=#{tmp_dir_device}]
+        system *%W[sudo dd bs=440 conv=notrunc count=1 if=/usr/lib/syslinux/mbr.bin of=#{tmp_dir_device}]
         system *%W[sudo extlinux --install #{tmp_dir_mount}/boot]
         system *%W[sudo umount -l #{tmp_dir_device}]
         FileUtils.remove_entry_secure(tmp_dir_mount)
@@ -163,7 +163,7 @@ class NodeInstance
       end
     when 'iso'
       begin
-        FileUtils.cp(File.join(init_dir, 'isolinux.bin'), File.join(tmp_dir, 'boot'))
+        FileUtils.cp('/usr/lib/syslinux/isolinux.bin', File.join(tmp_dir, 'boot'))
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
