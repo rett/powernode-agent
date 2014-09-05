@@ -7,6 +7,7 @@ require_relative 'agent'
 
 class Poller
   def poll
+    NodeArchitecture.all.each { |architecture| architecture.init_sync! }
     begin
       Account.all.each do |account|
         account.nodes.each do |node|
