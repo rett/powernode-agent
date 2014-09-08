@@ -8,14 +8,21 @@ domain: example.com
 module_compression: xz
 checksum_bitlength: 256
 instance_key_length: 32
-log_cycle: daily
 data_expiration: 0:30:00
 image_blocksize: 1024
 init_dir: /opt/powernode/init
-log_dir: /opt/powernode/agent/log
-log_file: powernode.log
-log_level: debug
 tmp_dir: /opt/powernode/agent/tmp
+
+# Logging options (file)
+log_facility: file
+log_file: /var/log/powernode/agent.log
+log_level: debug
+log_maxsize: <%= 100.megabytes %>
+log_maxtime: <%= 1.day %>
+
+# Logging options (syslog)
+#log_facility: syslog
+#log_level: debug
 
 # SMTP options
 smtp_admin_email: admin@nodealchemy.com

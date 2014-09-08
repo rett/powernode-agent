@@ -1,18 +1,23 @@
 require 'rubygems'
 require 'bundler/setup'
 require 'active_support/core_ext/string/strip'
+require 'active_support/core_ext/numeric/bytes'
 require 'active_support/time'
 require 'faraday'
 require 'find'
 require 'fog'
 require 'her'
 require 'json'
+require 'log4r'
+require 'log4r/outputter/rollingfileoutputter'
+require 'log4r/outputter/syslogoutputter'
 require 'net/ssh'
 require 'net/sftp'
 require 'openssl'
 require 'pony'
 require 'sidekiq'
 require 'sidekiq-middleware'
+require 'syslog'
 require 'tmpdir'
 require 'uuidtools'
 
@@ -24,8 +29,16 @@ module Powernode
 
   def self.logger
     if @logger.nil?
-      @logger = Logger.new(File.join(Powernode.config(:log_dir), Powernode.config(:log_file)), Powernode.config(:log_cycle))
-      @logger.level = Logger.const_get(Powernode.config(:log_level).upcase)
+      @logger = Log4r::Logger.new('powernode')
+      case Powernode.config(:log_facility)
+      when 'file'
+        @logger.outputters = Log4r::RollingFileOutputter.new('sidekiq', level: Logger.const_get(Powernode.config(:log_level).upcase),
+                                                                        filename: Powernode.config(:log_file),
+                                                                        maxsize: Powernode.config(:log_maxsize),
+                                                                        maxtime: Powernode.config(:log_maxtime))
+      when 'syslog'
+        @logger.outputters = Log4r::SyslogOutputter.new('sidekiq',      level: Logger.const_get(Powernode.config(:log_level).upcase))
+      end
     end
     @logger
   end
@@ -68,6 +81,8 @@ when 'smtp'
                                   authentication:       Powernode.config(:smtp_authentication),
                                   enable_starttls_auto: Powernode.config(:smtp_enable_starttls_auto) } }
 end
+
+Sidekiq::Logging.logger = Powernode.logger
 
 Sidekiq.configure_client do |config|
   config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
