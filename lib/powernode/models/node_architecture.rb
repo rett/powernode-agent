@@ -9,7 +9,7 @@ class NodeArchitecture
     %w[kernel ramdisk].each do |resource|
       init_resource = File.join(init_dir, "#{id}.#{resource}")
       resource_checksum = self.send("#{resource}_checksum")
-      calculated_checksum = Digest::SHA2.new(Powernode.config(:checksum_bitlength)).file(init_resource).hexdigest if File.exists?(init_resource)
+      calculated_checksum = File.exists?(init_resource) ? Digest::SHA2.new(Powernode.config(:checksum_bitlength)).file(init_resource).hexdigest : nil
       if resource_checksum.present? && resource_checksum != calculated_checksum
         Powernode.logger.info "Downloading #{resource} for architecture #{id}."
         response = Powernode.server.get("architectures/#{id}/download/#{resource}")

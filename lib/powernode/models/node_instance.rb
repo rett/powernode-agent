@@ -144,7 +144,7 @@ class NodeInstance
     case image_format
     when 'img'
       begin
-        image_file = Tempfile.new(["#{id}", '.img'])
+        image_file = Tempfile.new([id, '.img'])
         image_file_size = (`sudo du -bs #{tmp_dir} | cut -f1`.to_i * 1.15).to_i
         image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
         tmp_dir_mount = Dir.mktmpdir
@@ -167,7 +167,7 @@ class NodeInstance
         Powernode.logger.error "Exception: #{e.message}."
       end
       begin
-        image_file = Tempfile.new(["#{id}", '.img'])
+        image_file = Tempfile.new([id, '.img'])
         system *%W[sudo mkisofs -o #{image_file.path} -V #{name} -b boot/isolinux.bin -c boot/syslinux/boot.cat -r -J -l -quiet -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}]
         system *%W[sudo isohybrid #{image_file.path} --entry 1 --type 0x83]
       rescue => e

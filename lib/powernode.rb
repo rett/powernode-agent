@@ -30,7 +30,7 @@ module Powernode
   end
 
   def self.logger
-    if @logger.nil?
+    unless @logger
       @logger = Log4r::Logger.new('powernode')
       outputter_options = {}
       outputter_options[:level] = Logger.const_get(Powernode.config(:log_level).upcase)
@@ -54,7 +54,7 @@ module Powernode
   end
 
   def self.server
-    if @server.nil?
+    unless @server
       @server = Faraday.new(url: Powernode.config(:server_url) + '/api/agent_v1') do |connection|
         connection.basic_auth Powernode.config(:id), Powernode.config(:key)
         connection.request :multipart

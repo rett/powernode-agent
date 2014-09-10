@@ -11,6 +11,7 @@ instance_key_length: 32
 data_expiration: 0:30:00
 image_blocksize: 1024
 init_dir: /opt/powernode/init
+module_dir: /opt/powernode/store_modules
 tmp_dir: /opt/powernode/agent/tmp
 
 # Logging options (file)
@@ -67,7 +68,6 @@ poller_interval: <%= 10.seconds %>
 # Node Proxy options
 proxy_ip: 0.0.0.0
 proxy_port: 4567
-proxy_redirect: false
 
 # Agent options
 agent_cloud_error_limit: 3

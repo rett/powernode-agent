@@ -20,16 +20,7 @@ gem 'sinatra'
 gem 'sinatra-contrib'
 gem 'sinatra-synchrony'
 gem 'sys-filesystem'
+gem 'thin'
 gem 'unf'
 gem 'uuid'
 gem 'uuidtools'
-
-case RUBY_ENGINE
-when 'ruby'
-  gem 'thin'
-when 'rbx'
-  gem 'puma'
-  gem 'rubysl'
-when 'jruby'
-  gem 'puma'
-end

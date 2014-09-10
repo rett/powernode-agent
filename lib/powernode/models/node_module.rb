@@ -5,6 +5,18 @@ class NodeModule
 
   parse_root_in_json true
 
+  def package_spec
+    @package_spec ||= Powernode.server.get("node_modules/#{id}/download/package_spec").body
+  end
+
+  def rsync_spec
+    @rsync_spec ||= Powernode.server.get("node_modules/#{id}/download/rsync_spec").body
+  end
+
+  def spec
+    @spec ||= Powernode.server.get("node_modules/#{id}/download/spec").body
+  end
+
   def build!(node_instance)
     if package_spec.empty?
       Powernode.logger.info "Commit aborted: No package specification."

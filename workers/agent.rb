@@ -6,7 +6,6 @@ require 'powernode'
 
 class Agent
   include Sidekiq::Worker
-
   sidekiq_options({ queue: Powernode.config(:agent_queue),
                     retry: Powernode.config(:agent_job_retries),
                     unique: :all,
