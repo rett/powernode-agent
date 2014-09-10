@@ -8,14 +8,13 @@ class NodeInstance
 
   delegate :account, to: :node
   delegate :admin_user, to: :node
+  delegate :provider, to: :node
   delegate :ssh_key, to: :node
   delegate :ssh_key_file, to: :node
 
   attributes :image
 
   parse_root_in_json true
-
-  delegate :provider, to: :node
 
   def identity
     <<-EOF.strip_heredoc

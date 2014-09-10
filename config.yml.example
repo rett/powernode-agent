@@ -54,7 +54,7 @@ redis_namespace: alchemy
 redis_server: redis://localhost:6379/0
 
 # Node Poller options
-poller_interval: 10
+poller_interval: <%= 10.seconds %>
 
 # Node Proxy options
 proxy_ip: 0.0.0.0

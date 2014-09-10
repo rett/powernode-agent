@@ -54,7 +54,6 @@ class Agent
             end
           end
         end
-
         Powernode.logger.info "Performing cloud instance check for node #{@node.id}."
         @node.cloud_instances.each do |node_instance|
           node_instance.check!

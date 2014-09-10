@@ -3,7 +3,9 @@ require 'bundler/setup'
 require 'active_support/core_ext/string/strip'
 require 'active_support/core_ext/numeric/bytes'
 require 'active_support/time'
+require 'erb'
 require 'faraday'
+require 'faraday_middleware'
 require 'find'
 require 'fog'
 require 'her'
@@ -23,7 +25,7 @@ require 'uuidtools'
 
 module Powernode
   def self.config(key)
-    @config ||= YAML.load_file(File.join(File.dirname(__FILE__), '..', 'config.yml'))
+    @config ||= YAML::load(ERB.new(File.read(File.join(File.dirname(__FILE__), '..', 'config.yml'))).result)
     @config[key.to_s]
   end
 
@@ -32,12 +34,16 @@ module Powernode
       @logger = Log4r::Logger.new('powernode')
       case Powernode.config(:log_facility)
       when 'file'
-        @logger.outputters = Log4r::RollingFileOutputter.new('sidekiq', level: Logger.const_get(Powernode.config(:log_level).upcase),
-                                                                        filename: Powernode.config(:log_file),
-                                                                        maxsize: Powernode.config(:log_maxsize),
-                                                                        maxtime: Powernode.config(:log_maxtime))
+        outputter_options = {}
+        outputter_options[:level]    = Logger.const_get(Powernode.config(:log_level).upcase)
+        outputter_options[:filename] = Powernode.config(:log_file)    if Powernode.config(:log_file)
+        outputter_options[:maxsize]  = Powernode.config(:log_maxsize) if Powernode.config(:log_maxsize)
+        outputter_options[:maxtime]  = Powernode.config(:log_maxtime) if Powernode.config(:log_maxtime)
+        @logger.outputters = Log4r::RollingFileOutputter.new('sidekiq', outputter_options)
       when 'syslog'
-        @logger.outputters = Log4r::SyslogOutputter.new('sidekiq',      level: Logger.const_get(Powernode.config(:log_level).upcase))
+        outputter_options = {}
+        outputter_options[:level]    = Logger.const_get(Powernode.config(:log_level).upcase)
+        @logger.outputters = Log4r::SyslogOutputter.new('sidekiq', outputter_options)
       end
     end
     @logger
