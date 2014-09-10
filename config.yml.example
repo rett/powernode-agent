@@ -17,8 +17,16 @@ tmp_dir: /opt/powernode/agent/tmp
 log_facility: file
 log_file: /var/log/powernode/agent.log
 log_level: debug
-log_maxsize: <%= 100.megabytes %>
-log_maxtime: <%= 1.day %>
+log_trunc: false
+
+# Logging options (rollingfile)
+#log_facility: rollingfile
+#log_file: /var/log/powernode/agent.log
+#log_level: debug
+#log_max_backups: 5
+#log_maxtime: <%= 1.day %>
+#log_maxsize: <%= 100.megabytes %>
+#log_trunc: false
 
 # Logging options (syslog)
 #log_facility: syslog

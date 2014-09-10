@@ -32,17 +32,21 @@ module Powernode
   def self.logger
     if @logger.nil?
       @logger = Log4r::Logger.new('powernode')
+      outputter_options = {}
+      outputter_options[:level] = Logger.const_get(Powernode.config(:log_level).upcase)
       case Powernode.config(:log_facility)
       when 'file'
-        outputter_options = {}
-        outputter_options[:level]    = Logger.const_get(Powernode.config(:log_level).upcase)
-        outputter_options[:filename] = Powernode.config(:log_file)    if Powernode.config(:log_file)
-        outputter_options[:maxsize]  = Powernode.config(:log_maxsize) if Powernode.config(:log_maxsize)
-        outputter_options[:maxtime]  = Powernode.config(:log_maxtime) if Powernode.config(:log_maxtime)
+        outputter_options[:filename] = Powernode.config(:log_file) if Powernode.config(:log_file)
+        outputter_options[:trunc] = Powernode.config(:log_trunc) if Powernode.config(:log_trunc)
+        @logger.outputters = Log4r::FileOutputter.new('sidekiq', outputter_options)
+      when 'rollingfile'
+        outputter_options[:filename] = Powernode.config(:log_file) if Powernode.config(:log_file)
+        outputter_options[:max_backups] = Powernode.config(:log_max_backups) if Powernode.config(:log_max_backups)
+        outputter_options[:maxsize] = Powernode.config(:log_maxsize) if Powernode.config(:log_maxsize)
+        outputter_options[:maxtime] = Powernode.config(:log_maxtime) if Powernode.config(:log_maxtime)
+        outputter_options[:trunc] = Powernode.config(:log_trunc) if Powernode.config(:log_trunc)
         @logger.outputters = Log4r::RollingFileOutputter.new('sidekiq', outputter_options)
       when 'syslog'
-        outputter_options = {}
-        outputter_options[:level]    = Logger.const_get(Powernode.config(:log_level).upcase)
         @logger.outputters = Log4r::SyslogOutputter.new('sidekiq', outputter_options)
       end
     end
