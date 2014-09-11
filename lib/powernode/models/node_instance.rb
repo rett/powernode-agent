@@ -178,9 +178,9 @@ class NodeInstance
       payload = { image_format: image_format, image: Faraday::UploadIO.new(image_file.path, 'application/octet-stream') }
       response = Powernode.server.post("node_instances/#{id}/upload/image", payload)
       if response.status == 200
-        account.notifications.create(category: :notice, summary: "#{image_format.upcase} image created for instance #{id}.")
+        account.notifications.create(category: :notice, summary: "#{image_format.upcase} image created for instance #{name}.")
       else
-        account.notifications.create(category: :error, summary: "Failed to create #{image_format.upcase} image for instance #{id}.")
+        account.notifications.create(category: :error, summary: "Failed to create #{image_format.upcase} image for instance #{name}.")
       end
     end
     FileUtils.remove_entry_secure(image_file)
