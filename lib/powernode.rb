@@ -32,8 +32,8 @@ module Powernode
   def self.logger
     unless @logger
       @logger = Log4r::Logger.new('powernode')
+      @logger.level = Log4r.const_get(Powernode.config(:log_level).upcase)
       outputter_options = {}
-      outputter_options[:level] = Logger.const_get(Powernode.config(:log_level).upcase)
       case Powernode.config(:log_facility)
       when 'file'
         outputter_options[:filename] = Powernode.config(:log_file) if Powernode.config(:log_file)
@@ -47,7 +47,7 @@ module Powernode
         outputter_options[:trunc] = Powernode.config(:log_trunc) if Powernode.config(:log_trunc)
         @logger.outputters = Log4r::RollingFileOutputter.new('sidekiq', outputter_options)
       when 'syslog'
-        @logger.outputters = Log4r::SyslogOutputter.new('sidekiq', outputter_options)
+        @logger.outputters = Log4r::SyslogOutputter.new('sidekiq', outputter_options.to_options)
       end
     end
     @logger
