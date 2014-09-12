@@ -34,7 +34,11 @@ class Node
   end
 
   def dynamic_instance_variance
-    self.respond_to?(:dynamic_instance_count) ? dynamic_instance_count - dynamic_instances.count : 0
+    if dynamic_instance_max_available < dynamic_instances.count
+      dynamic_instance_max_available - dynamic_instances.count
+    else
+      dynamic_instance_count - dynamic_instances.count
+    end
   end
 
   def key

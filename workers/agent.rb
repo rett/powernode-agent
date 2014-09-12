@@ -60,6 +60,9 @@ class Agent
           if @node.node_instances.count + count > @node.instance_limit
             count = @node.instance_limit - @node.node_instances.count
             Powernode.logger.info "Account instance limit exceeded, reducing count to #{count} instances."
+            @node.dynamic_instance_count = @node.dynamic_instance_max_available
+            @node.save
+            @account.notifications.create(category: :warning, summary: "Instance limit for node #{@node.name} exceeded, reduced dynamic instance count to #{@node.dynamic_instance_count}.")
           end
           count.times { @node.launch_instance!('dynamic') }
         elsif @node.dynamic_instance_variance < 0
