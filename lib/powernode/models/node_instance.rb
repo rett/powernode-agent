@@ -74,6 +74,7 @@ class NodeInstance
   end
 
   def create_image!(options)
+    sleep 1 until node.node_architecture.init_sync!
     image_format = options[:image_format]
     init_dir = Powernode.config(:init_dir)
     Powernode.logger.info "Creating #{image_format} image for instance #{id}."
@@ -211,6 +212,7 @@ class NodeInstance
   end
 
   def netboot_sync!
+    sleep 1 until node.node_architecture.init_sync!
     init_dir = Powernode.config(:init_dir)
     pxelinux_dir = File.join(init_dir, 'pxelinux.cfg')
     FileUtils.mkdir_p(pxelinux_dir) unless Dir.exist?(pxelinux_dir)

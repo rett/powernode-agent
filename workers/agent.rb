@@ -36,6 +36,18 @@ class Agent
     if (@node = Node.find(@job['node_id']))
       Powernode.logger.info "Polling node #{@node.id}."
       if @node.enabled
+        @node.physical_instances.each do |node_instance|
+          Powernode.logger.info "Checking physical instance #{node_instance.id}."
+          node_instance.netboot_sync! if node_instance.private_netboot_enabled?
+        end
+        Powernode.logger.info "Performing cloud instance check for node #{@node.id}."
+        @node.cloud_instances.each do |node_instance|
+          node_instance.check!
+        end
+        Powernode.logger.info "Performing dynamic instance check for node #{@node.id}."
+        @node.dynamic_instances.each do |node_instance|
+          node_instance.check!
+        end
         @node.operations.each do |operation|
           if (@operation = @node.operations.find(operation.id).first)
             @node_instance = @node.node_instances.find(@operation.node_instance_id) if @operation.try(:node_instance_id)
@@ -53,14 +65,6 @@ class Agent
             end
           end
         end
-        Powernode.logger.info "Performing cloud instance check for node #{@node.id}."
-        @node.cloud_instances.each do |node_instance|
-          node_instance.check!
-        end
-        Powernode.logger.info "Performing dynamic instance check for node #{@node.id}."
-        @node.dynamic_instances.each do |node_instance|
-          node_instance.check!
-        end
         if @node.dynamic_instance_variance > 0
           Powernode.logger.info "Attempting to launch #{@node.dynamic_instance_variance} instances for node #{@node.id}."
           count = @node.dynamic_instance_variance
@@ -76,12 +80,6 @@ class Agent
       elsif @node.dynamic_instances.count > 0
         @node.terminate_dynamic_instances!(@node.dynamic_instances.count)
       end
-      Powernode.logger.info "Performing physical instance check for node #{@node.id}."
-      @node.physical_instances.each do |node_instance|
-        Powernode.logger.info "Checking physical instance #{node_instance.id}."
-        node_instance.netboot_sync!
-      end
-      Powernode.logger.info "Physical instance check complete for node #{@node.id}."
     end
   end
 
