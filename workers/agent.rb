@@ -36,18 +36,7 @@ class Agent
     if (@node = Node.find(@job['node_id']))
       Powernode.logger.info "Polling node #{@node.id}."
       if @node.enabled
-        @node.physical_instances.each do |node_instance|
-          Powernode.logger.info "Checking physical instance #{node_instance.id}."
-          node_instance.netboot_sync! if node_instance.private_netboot_enabled?
-        end
-        Powernode.logger.info "Performing cloud instance check for node #{@node.id}."
-        @node.cloud_instances.each do |node_instance|
-          node_instance.check!
-        end
-        Powernode.logger.info "Performing dynamic instance check for node #{@node.id}."
-        @node.dynamic_instances.each do |node_instance|
-          node_instance.check!
-        end
+        @node.node_instances.each { |node_instance| node_instance.check! }
         @node.operations.each do |operation|
           if (@operation = @node.operations.find(operation.id).first)
             @node_instance = @node.node_instances.find(@operation.node_instance_id) if @operation.try(:node_instance_id)

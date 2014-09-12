@@ -56,16 +56,21 @@ class NodeInstance
   end
 
   def check!
-    if instance
-      Powernode.logger.info "Updating cloud instance #{id}."
-      begin
-        self.private_ip_address = instance.private_ip_address
-        self.public_ip_address = instance.public_ip_address
-        self.status = instance.state
-      rescue => e
-        Powernode.logger.error "Exception: #{e.message}."
+    case variety
+    when 'cloud', 'dynamic'
+      if instance
+        Powernode.logger.info "Updating cloud instance #{id}."
+        begin
+          self.private_ip_address = instance.private_ip_address
+          self.public_ip_address = instance.public_ip_address
+          self.status = instance.state
+        rescue => e
+          Powernode.logger.error "Exception: #{e.message}."
+        end
+        save if changed?
       end
-      save if changed?
+    when 'physical'
+      netboot_sync! if private_netboot_enabled?
     end
     case status
     when 'terminated'
