@@ -10,7 +10,7 @@ require 'sinatra/synchrony'
 require 'thin'
 require_relative 'store'
 
-class NodeProxy < Sinatra::Base
+class Proxy < Sinatra::Base
   register Sinatra::Synchrony
   register Sinatra::MultiRoute
 
@@ -47,9 +47,9 @@ class NodeProxy < Sinatra::Base
             status = 'wait'
           end
           csv << [status,
-                node_module.id,
-                node_module.data_file_version,
-                node_module.data_checksum] if node_module.data_checksum
+                  node_module.id,
+                  node_module.data_file_version,
+                  node_module.data_checksum] if node_module.data_checksum
         end
       end
     end
@@ -97,4 +97,4 @@ class NodeProxy < Sinatra::Base
   end
 end
 
-NodeProxy.run!
+Proxy.run!

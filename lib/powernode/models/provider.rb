@@ -3,17 +3,21 @@ class Provider
   include Powernode::Encryption
 
   belongs_to :provider_endpoint
-  has_many   :node_instances
-  has_many   :volumes
+  has_many :node_instances
+  has_many :operations
+  has_many :provider_volumes
 
-  delegate :availability_zone,  to: :provider_endpoint
   delegate :endpoint_type,      to: :provider_endpoint
+  delegate :endpoint_url,       to: :provider_endpoint
   delegate :machine_image,      to: :provider_endpoint
   delegate :kernel_image,       to: :provider_endpoint
   delegate :ramdisk_image,      to: :provider_endpoint
   delegate :region,             to: :provider_endpoint
 
   parse_root_in_json true
+
+  def do_maintenance(job)
+  end
 
   def compute
     unless @compute
@@ -44,14 +48,14 @@ class Provider
       @provider_options = { provider: endpoint_type }
       case endpoint_type
       when 'aws'
-        @provider_options[:endpoint] = provider_endpoint.endpoint_url
+        @provider_options[:endpoint] = endpoint_url
         @provider_options[:aws_access_key_id] = access_key
         @provider_options[:aws_secret_access_key] = secret_key
       when 'openstack'
-        @provider_options[:openstack_auth_url] = provider_endpoint.endpoint_url + '/tokens'
+        @provider_options[:openstack_auth_url] = endpoint_url + '/tokens'
         @provider_options[:openstack_username] = access_key
         @provider_options[:openstack_api_key] = secret_key
-        @provider_options[:openstack_tenant] = tenant
+        @provider_options[:openstack_tenant] = tenant if tenant.present?
       end
     end
     @provider_options

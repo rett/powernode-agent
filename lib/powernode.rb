@@ -19,6 +19,7 @@ require 'openssl'
 require 'pony'
 require 'sidekiq'
 require 'sidekiq-middleware'
+require 'sidekiq-status'
 require 'syslog'
 require 'tmpdir'
 require 'uuidtools'
@@ -96,8 +97,17 @@ Sidekiq::Logging.logger = Powernode.logger
 
 Sidekiq.configure_client do |config|
   config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
+  config.client_middleware do |chain|
+    chain.add Sidekiq::Status::ClientMiddleware
+  end
 end
 
 Sidekiq.configure_server do |config|
   config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
+  config.server_middleware do |chain|
+    chain.add Sidekiq::Status::ServerMiddleware, expiration: 30.minutes
+  end
+  config.client_middleware do |chain|
+    chain.add Sidekiq::Status::ClientMiddleware
+  end
 end

@@ -18,7 +18,7 @@ Gem::Specification.new do |s|
     lib/powernode/models/node.rb
     lib/powernode/models/node_architecture.rb
     lib/powernode/models/node_instance.rb
-    lib/powernode/models/node_instance_type.rb
+    lib/powernode/models/provider_instance_type.rb
     lib/powernode/models/node_module.rb
     lib/powernode/models/node_platform.rb
     lib/powernode/models/node_template.rb
