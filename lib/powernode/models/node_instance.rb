@@ -206,8 +206,9 @@ class NodeInstance
     end
     if address
       begin
-        instance.service.associate_address(entity, address.ip)
-        self.public_ip_address = address.respond_to?(:public_ip) ? address.public_ip : address.ip
+        ip = address.respond_to?(:public_ip) ? address.public_ip : address.ip
+        instance.service.associate_address(entity, ip)
+        self.public_ip_address = ip
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end

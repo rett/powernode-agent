@@ -80,7 +80,6 @@ class Node
       instance_options = {}
       instance_options[:name]               = node_instance.id
       instance_options[:user_data]          = node_instance.identity
-      instance_options[:allocate_public_ip] = allocate_public_ip
       instance_options[:availability_zone]  = provider.availability_zone      if provider.availability_zone.present?
       instance_options[:image_id]           = provider.machine_image          if provider.machine_image.present?
       instance_options[:image_ref]          = provider.machine_image          if provider.machine_image.present?
@@ -103,10 +102,10 @@ class Node
         node_instance.name = cloud_instance.id
         node_instance.provider_id = provider.id
         node_instance.private_ip_address = cloud_instance.private_ip_address
-        node_instance.public_ip_address = cloud_instance.public_ip_address
         node_instance.status = cloud_instance.state
         node_instance.started_at = cloud_instance.respond_to?(:created_at) ? cloud_instance.created_at : cloud_instance.created
         if node_instance.save
+          node_instance.do_public_ip_associate(job) if allocate_public_ip?
           Powernode.logger.info "Launched instance #{cloud_instance.id}."
         else
           provider.compute.servers.destroy(cloud_instance.id)
