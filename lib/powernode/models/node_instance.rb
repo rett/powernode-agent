@@ -226,7 +226,11 @@ class NodeInstance
     unless address.nil?
       Powernode.logger.info "Disassociating public IP for instance #{id}."
       begin
-        instance.service.disassociate_address(entity, public_ip_address)
+        if instance.respond_to?(:disassociate_address)
+          instance.disassociate_address(public_ip_address)
+        else
+          instance.service.disassociate_address(public_ip_address)
+        end
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
