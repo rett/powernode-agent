@@ -8,14 +8,30 @@ domain: example.com
 module_compression: xz
 checksum_bitlength: 256
 instance_key_length: 32
-log_cycle: daily
 data_expiration: 0:30:00
 image_blocksize: 1024
 init_dir: /opt/powernode/init
-log_dir: /opt/powernode/agent/log
-log_file: powernode.log
-log_level: debug
+module_dir: /opt/powernode/store_modules
 tmp_dir: /opt/powernode/agent/tmp
+
+# Logging options (file)
+log_facility: file
+log_file: /var/log/powernode/agent.log
+log_level: debug
+log_trunc: false
+
+# Logging options (rollingfile)
+#log_facility: rollingfile
+#log_file: /var/log/powernode/agent.log
+#log_level: debug
+#log_max_backups: 5
+#log_maxtime: <%= 1.day %>
+#log_maxsize: <%= 100.megabytes %>
+#log_trunc: false
+
+# Logging options (syslog)
+#log_facility: syslog
+#log_level: debug
 
 # SMTP options
 smtp_admin_email: admin@nodealchemy.com
@@ -47,12 +63,11 @@ redis_namespace: alchemy
 redis_server: redis://localhost:6379/0
 
 # Node Poller options
-poller_interval: 10
+poller_interval: <%= 10.seconds %>
 
 # Node Proxy options
 proxy_ip: 0.0.0.0
 proxy_port: 4567
-proxy_redirect: false
 
 # Agent options
 agent_cloud_error_limit: 3

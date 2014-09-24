@@ -1,13 +1,13 @@
-class VolumeMember
+class ProviderVolumeMember
   include Her::Model
 
   STATUSES = %w[available creating provisioning]
 
-  belongs_to :volume
+  belongs_to :provider_volume
 
   parse_root_in_json true
 
-  VolumeMember::STATUSES.each do |s|
+  ProviderVolumeMember::STATUSES.each do |s|
     define_method(s + '?') do
       self.status == s
     end
@@ -34,7 +34,7 @@ class VolumeMember
   def check!
     Powernode.logger.info "Checking volume member #{id}"
     begin
-      cloud_volume = volume.provider.compute.volumes.get(entity)
+      cloud_volume = provider_volume.provider.compute.volumes.get(entity)
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
@@ -45,9 +45,9 @@ class VolumeMember
 
   def attach!
     if available? && !attached?
-      Powernode.logger.info "Attaching volume member #{id} to instance #{volume.node_instance_id}"
+      Powernode.logger.info "Attaching volume member #{id} to instance #{provider_volume.node_instance_id}"
       begin
-        volume.provider.compute.attach_volume(entity, volume.node_instance.entity, device)
+        provider_volume.provider.compute.attach_volume(entity, provider_volume.node_instance.entity, device)
         self.attached!
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
@@ -57,9 +57,9 @@ class VolumeMember
 
   def detach!
     if attached?
-      Powernode.logger.info "Detaching volume member #{id} from instance #{volume.active_instance_id}"
+      Powernode.logger.info "Detaching volume member #{id} from instance #{provider_volume.active_instance_id}"
       begin
-        volume.provider.compute.detach_volume(volume.active_instance.entity, entity)
+        provider_volume.provider.compute.detach_volume(provider_volume.active_instance.entity, entity)
         self.available!
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."

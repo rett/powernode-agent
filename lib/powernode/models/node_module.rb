@@ -5,13 +5,18 @@ class NodeModule
 
   parse_root_in_json true
 
-  def build!(node_instance)
+  def do_build(job)
+    node = account.nodes.find(job['options']['node_id'])
+    node_instance = node.node_instances.find(job['options']['node_instance_id'])
     if package_spec.empty?
       Powernode.logger.info "Commit aborted: No package specification."
       account.notifications.create(category: :error, summary: "Build aborted for module #{name}: No package specification")
     elsif lock_spec?
       Powernode.logger.info "Commit aborted: Spec locked."
       account.notifications.create(category: :error, summary: "Build aborted for module #{name}: Spec locked")
+    elsif !node_instance
+      Powernode.logger.info "Commit aborted: Node instance not available."
+      account.notifications.create(category: :error, summary: "Build aborted for module #{name}: Node instance not available")
     else
       Powernode.logger.info "Building module #{id} on instance #{node_instance.id}."
       begin
@@ -53,10 +58,15 @@ class NodeModule
     end
   end
 
-  def commit!(node_instance)
+  def do_commit(job)
+    node = account.nodes.find(job['options']['node_id'])
+    node_instance = node.node_instances.find(job['options']['node_instance_id'])
     if rsync_spec.empty?
       Powernode.logger.info "Commit aborted: No module specification."
       account.notifications.create(category: :error, summary: "Commit aborted for module #{name}: No module specification")
+    elsif !node_instance
+      Powernode.logger.info "Commit aborted: Node instance not available."
+      account.notifications.create(category: :error, summary: "Commit aborted for module #{name}: Node instance not available")
     else
       Powernode.logger.info "Committing module #{id}."
       tmp_dir = Dir.mktmpdir("#{id}")
@@ -123,5 +133,19 @@ class NodeModule
         Powernode.logger.error "Commit aborted for module #{id}."
       end
     end
+  end
+
+  private
+
+  def package_spec
+    @package_spec ||= Powernode.server.get("node_modules/#{id}/download/package_spec").body
+  end
+
+  def rsync_spec
+    @rsync_spec ||= Powernode.server.get("node_modules/#{id}/download/rsync_spec").body
+  end
+
+  def spec
+    @spec ||= Powernode.server.get("node_modules/#{id}/download/spec").body
   end
 end

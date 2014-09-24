@@ -1,37 +1,61 @@
 require 'rubygems'
 require 'bundler/setup'
 require 'active_support/core_ext/string/strip'
+require 'active_support/core_ext/numeric/bytes'
 require 'active_support/time'
+require 'erb'
 require 'faraday'
+require 'faraday_middleware'
 require 'find'
 require 'fog'
 require 'her'
 require 'json'
+require 'log4r'
+require 'log4r/outputter/rollingfileoutputter'
+require 'log4r/outputter/syslogoutputter'
 require 'net/ssh'
 require 'net/sftp'
 require 'openssl'
 require 'pony'
 require 'sidekiq'
 require 'sidekiq-middleware'
+require 'sidekiq-status'
+require 'syslog'
 require 'tmpdir'
 require 'uuidtools'
 
 module Powernode
   def self.config(key)
-    @config ||= YAML.load_file(File.join(File.dirname(__FILE__), '..', 'config.yml'))
+    @config ||= YAML::load(ERB.new(File.read(File.join(File.dirname(__FILE__), '..', 'config.yml'))).result)
     @config[key.to_s]
   end
 
   def self.logger
-    if @logger.nil?
-      @logger = Logger.new(File.join(Powernode.config(:log_dir), Powernode.config(:log_file)), Powernode.config(:log_cycle))
-      @logger.level = Logger.const_get(Powernode.config(:log_level).upcase)
+    unless @logger
+      @logger = Log4r::Logger.new('powernode')
+      @logger.level = Log4r.const_get(Powernode.config(:log_level).upcase)
+      outputter_options = {}
+      case Powernode.config(:log_facility)
+      when 'file'
+        outputter_options[:filename] = Powernode.config(:log_file) if Powernode.config(:log_file)
+        outputter_options[:trunc] = Powernode.config(:log_trunc) if Powernode.config(:log_trunc)
+        @logger.outputters = Log4r::FileOutputter.new('sidekiq', outputter_options)
+      when 'rollingfile'
+        outputter_options[:filename] = Powernode.config(:log_file) if Powernode.config(:log_file)
+        outputter_options[:max_backups] = Powernode.config(:log_max_backups) if Powernode.config(:log_max_backups)
+        outputter_options[:maxsize] = Powernode.config(:log_maxsize) if Powernode.config(:log_maxsize)
+        outputter_options[:maxtime] = Powernode.config(:log_maxtime) if Powernode.config(:log_maxtime)
+        outputter_options[:trunc] = Powernode.config(:log_trunc) if Powernode.config(:log_trunc)
+        @logger.outputters = Log4r::RollingFileOutputter.new('sidekiq', outputter_options)
+      when 'syslog'
+        @logger.outputters = Log4r::SyslogOutputter.new('sidekiq', outputter_options.to_options)
+      end
     end
     @logger
   end
 
   def self.server
-    if @server.nil?
+    unless @server
       @server = Faraday.new(url: Powernode.config(:server_url) + '/api/agent_v1') do |connection|
         connection.basic_auth Powernode.config(:id), Powernode.config(:key)
         connection.request :multipart
@@ -69,10 +93,21 @@ when 'smtp'
                                   enable_starttls_auto: Powernode.config(:smtp_enable_starttls_auto) } }
 end
 
+Sidekiq::Logging.logger = Powernode.logger
+
 Sidekiq.configure_client do |config|
   config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
+  config.client_middleware do |chain|
+    chain.add Sidekiq::Status::ClientMiddleware
+  end
 end
 
 Sidekiq.configure_server do |config|
   config.redis = { namespace: Powernode.config(:redis_namespace), url: Powernode.config(:redis_server) }
+  config.server_middleware do |chain|
+    chain.add Sidekiq::Status::ServerMiddleware, expiration: 30.minutes
+  end
+  config.client_middleware do |chain|
+    chain.add Sidekiq::Status::ClientMiddleware
+  end
 end

@@ -7,21 +7,10 @@ require_relative 'agent'
 
 class Poller
   def poll
-    NodeArchitecture.all.each { |architecture| architecture.init_sync! }
     begin
       Account.all.each do |account|
-        account.nodes.each do |node|
-          command = 'node_poll'
-          Powernode.logger.info "Queued #{command} for node #{node.id}." if Agent.perform_async({ command: command,
-                                                                                                  account_id: account.id,
-                                                                                                  node_id: node.id })
-        end
-        account.volumes.each do |volume|
-          command = 'volume_poll'
-          Powernode.logger.info "Queued #{command} for volume #{volume.id}." if Agent.perform_async({ command: command,
-                                                                                                      account_id: account.id,
-                                                                                                      volume_id: volume.id })
-        end
+        command = 'maintenance'
+        Agent.perform_async({ command: command, operable_type: 'account', operable_id: account.id })
       end
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
@@ -29,20 +18,18 @@ class Poller
     perform_cleanup!
     sleep Powernode.config(:poller_interval)
   end
-end
 
-def perform_cleanup!
-  pxelinux_dir = File.join(Powernode.config(:init_dir), 'pxelinux.cfg')
-  Dir.glob(File.join(pxelinux_dir, '??-??-??-??-??-??')) do |f|
-    FileUtils.rm(f) if File.mtime(f) < Time.now - Powernode.config(:data_expiration)
+  private
+
+  def perform_cleanup!
+    pxelinux_dir = File.join(Powernode.config(:init_dir), 'pxelinux.cfg')
+    Dir.glob(File.join(pxelinux_dir, '??-??-??-??-??-??')) do |f|
+      FileUtils.rm(f) if File.mtime(f) < Time.now - Powernode.config(:data_expiration)
+    end
   end
 end
 
-def run!
-  poller = Poller.new
-  Powernode.logger.warn 'Poller started.'
-  poller.poll while true
-  Powernode.logger.warn 'Poller stopped.'
-end
-
-run!
+poller = Poller.new
+Powernode.logger.warn 'Poller started.'
+poller.poll while true
+Powernode.logger.warn 'Poller stopped.'
