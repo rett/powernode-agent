@@ -191,7 +191,7 @@ class NodeInstance
     unless address
       begin
         Powernode.logger.info "Searching for unallocated public IP for instance #{id}."
-        address = provider.compute.addresses.find { |a| a.instance_id.nil? }
+        address = provider.compute.addresses.find { |a| a.respond_to?(:instance_id) ? a.instance_id.nil? : a.server_id.nil? }
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
@@ -207,7 +207,7 @@ class NodeInstance
     if address
       begin
         instance.service.associate_address(entity, address.ip)
-        self.public_ip_address = address.ip
+        self.public_ip_address = address.respond_to?(:public_ip) ? address.public_ip : address.ip
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
