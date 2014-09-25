@@ -30,10 +30,10 @@ class Operation
   alias async? async
 
   def to_hash
-    { command: command,
-      id: id,
-      operable_id: operable_id,
-      operable_type: operable_type,
-      options: options }
+    { 'command' => command,
+      'id' => id,
+      'operable_id' => operable_id,
+      'operable_type' => operable_type,
+      'options' => options }
   end
 end
