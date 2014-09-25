@@ -29,7 +29,10 @@ class NodeInstance
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
-        save if changed?
+        if instance.respond_to?(:tags) && instance.tags['Name'] != name
+          provider.compute.tags.create(resource_id: entity, key: 'Name', value: name)
+        end
+        self.save if changed?
       end
     when 'physical'
       netboot_sync if private_netboot_enabled?
@@ -298,7 +301,7 @@ class NodeInstance
       begin
         @instance = provider.compute.servers.get(entity)
         self.status = 'terminated' unless @instance
-        save if changed?
+        self.save if changed?
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
