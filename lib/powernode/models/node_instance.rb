@@ -204,6 +204,7 @@ class NodeInstance
         Powernode.logger.info "Allocating public IP for instance #{id}."
         address = provider.compute.addresses.create
       rescue => e
+        account.notifications.create(category: :error, summary: "Unable to allocate IP for instance #{name}: #{e.message}")
         Powernode.logger.error "Exception: #{e.message}."
       end
     end
