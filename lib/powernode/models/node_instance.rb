@@ -210,8 +210,13 @@ class NodeInstance
     end
     if address
       begin
-        ip = address.respond_to?(:public_ip) ? address.public_ip : address.ip
-        instance.service.associate_address(entity, ip)
+        if address.respond_to?(:allocation_id)
+          ip = address.public_ip
+          instance.service.associate_address(entity, ip, nil, address.allocation_id)
+        else
+          ip = address.ip
+          instance.service.associate_address(entity, ip)
+        end
         self.public_ip_address = ip
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
@@ -230,8 +235,8 @@ class NodeInstance
     unless address.nil?
       Powernode.logger.info "Disassociating public IP for instance #{id}."
       begin
-        if instance.respond_to?(:disassociate_address)
-          instance.disassociate_address(public_ip_address)
+        if address.respond_to?(:allocation_id)
+          instance.service.disassociate_address(nil, address.allocation_id)
         else
           instance.service.disassociate_address(public_ip_address)
         end
