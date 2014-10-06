@@ -235,7 +235,7 @@ class NodeInstance
       Powernode.logger.info "Disassociating public IP for instance #{id}."
       begin
         if address.respond_to?(:association_id)
-          instance.service.disassociate_address(entity, address.association_id)
+          instance.service.disassociate_address(nil, address.association_id)
         else
           instance.service.disassociate_address(entity, public_ip_address)
         end
