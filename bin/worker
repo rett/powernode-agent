@@ -52,7 +52,7 @@ pool_start()
 {
   check_requirements
   pool_getpid
-  if [ ! "${PID}" -a -f "${BASEDIR}/.launch_${NAME}" ]; then
+  if [ ! "${PID}" ]; then
     echo "Starting ${NAME} pool..."
     sidekiq -C "${CFGFILE}" -P "${PIDFILE}" -r "${WORKER}" -d
     while [ ! -f "${PIDFILE}" ]; do

@@ -5,7 +5,7 @@ class NodeModule
 
   parse_root_in_json true
 
-  def do_build(job)
+  def do_build(job = {})
     node = account.nodes.find(job['options']['node_id'])
     node_instance = node.node_instances.find(job['options']['node_instance_id'])
     if package_spec.empty?
@@ -58,7 +58,7 @@ class NodeModule
     end
   end
 
-  def do_commit(job)
+  def do_commit(job = {})
     node = account.nodes.find(job['options']['node_id'])
     node_instance = node.node_instances.find(job['options']['node_instance_id'])
     if rsync_spec.empty?

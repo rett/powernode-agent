@@ -1,11 +1,11 @@
 class Account
   include Her::Model
-  include Powernode::Encryption
 
   has_many :nodes
   has_many :notifications
   has_many :operations
-  has_many :providers
+  has_many :provider_connections
+  has_many :provider_regions, through: :provider_connections
 
   parse_root_in_json true
 
@@ -50,8 +50,8 @@ class Account
       end
     end
     command = 'maintenance'
-    providers.each do |provider|
-      Agent.perform_async({ command: command, operable_type: 'provider', operable_id: provider.id })
+    provider_connections.each do |provider_connection|
+      Agent.perform_async({ command: command, operable_type: 'provider_connection', operable_id: provider_connection.id })
     end
     nodes.each do |node|
       Agent.perform_async({ command: command, operable_type: 'node', operable_id: node.id })

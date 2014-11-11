@@ -1,11 +1,48 @@
 class NodeArchitecture
   include Her::Model
 
+  belongs_to :account
+
   parse_root_in_json true
+
+  def do_create_image(job = {})
+    Powernode.logger.info "Creating image for architecture #{id}."
+    image_dir = image_prepare!
+    FileUtils.mkdir_p(File.join(image_dir, 'boot', 'syslinux'))
+    begin
+      image_file = Tempfile.new([id, '.img'])
+      image_file_size = (`sudo du -bs #{image_dir} | cut -f1`.to_i * 1.15).to_i
+      image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
+      image_dir_mount = Dir.mktmpdir
+      system *%W[sudo dd if=/dev/zero of=#{image_file.path} bs=#{Powernode.config(:image_blocksize).to_i} count=#{image_file_blocks}]
+      system *%W[sudo mkfs.ext4 -F #{image_file.path}]
+      system *%W[sudo mount -o loop #{image_file.path} #{image_dir_mount}]
+      image_dir_device = `sudo losetup -j #{image_file.path}`.split(':').first
+      system *%W[sudo cp -a #{File.join(image_dir, '.')} #{image_dir_mount}]
+      system *%W[sudo dd bs=440 conv=notrunc count=1 if=/usr/lib/syslinux/mbr.bin of=#{image_dir_device}]
+      system *%W[sudo extlinux --install #{image_dir_mount}/boot]
+      system *%W[sudo umount -l #{image_dir_device}]
+      FileUtils.remove_entry_secure(image_dir_mount)
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
+    end
+    if image_file && image_file.size > 0
+      payload = { image: Faraday::UploadIO.new(image_file.path, 'application/octet-stream') }
+      response = Powernode.server.post("architectures/#{id}/upload/image", payload)
+      if response.status == 200
+        account.notifications.create(category: :notice, summary: "Image created for architecture #{name}.")
+      else
+        account.notifications.create(category: :error, summary: "Failed to create image for architecture #{name}.")
+      end
+    end
+    FileUtils.remove_entry_secure(image_file)
+    FileUtils.remove_entry_secure(image_dir)
+  end
+
 
   def init_sync!
     init_dir = Powernode.config(:init_dir)
-    FileUtils.mkdir_p(init_dir) if !Dir.exist?(init_dir)
+    FileUtils.mkdir_p(init_dir) unless Dir.exist?(init_dir)
     %w[kernel ramdisk].each do |resource|
       init_resource = File.join(init_dir, "#{id}.#{resource}")
       resource_checksum = self.send("#{resource}_checksum")
@@ -29,5 +66,41 @@ class NodeArchitecture
         end
       end
     end
+  end
+
+  def image_prepare!
+    sleep 1 until init_sync!
+    init_dir = Powernode.config(:init_dir)
+    begin
+      FileUtils.mkdir_p(init_dir) unless Dir.exist?(init_dir)
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
+    end
+    begin
+      image_dir = Dir.mktmpdir
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
+    end
+    FileUtils.mkdir_p(File.join(image_dir, 'boot'))
+    begin
+      FileUtils.cp(File.join(init_dir, "#{id}.kernel"), File.join(image_dir, 'boot', 'kernel'))
+      FileUtils.cp(File.join(init_dir, "#{id}.ramdisk"), File.join(image_dir, 'boot', 'ramdisk'))
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
+    end
+    FileUtils.mkdir_p(File.join(image_dir, 'boot', 'syslinux'))
+    syslinux_cfg_file = File.join(image_dir, 'boot', 'syslinux', 'syslinux.cfg')
+    begin
+      File.open(syslinux_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
+        f.flock(File::LOCK_EX)
+        f << "DEFAULT alchemy\n" +
+            "LABEL alchemy\n" +
+            "LINUX /boot/kernel\n" +
+            "INITRD /boot/ramdisk\n"
+        f.flush
+        f.truncate(f.pos)
+      end
+    end
+    image_dir
   end
 end

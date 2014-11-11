@@ -1,23 +1,26 @@
 class NodeInstance
   include Her::Model
-  include Powernode::Encryption
 
   belongs_to :node
+  belongs_to :provider_connection
+  belongs_to :provider_region
   belongs_to :provider_instance_type
+  belongs_to :provider_network_subnet
   has_many :node_modules
   has_many :operations
   has_many :provider_network_ips
+
   delegate :account, to: :node
   delegate :admin_user, to: :node
-  delegate :provider, to: :node
   delegate :ssh_key, to: :node
+  delegate :ssh_key_data, to: :node
   delegate :ssh_key_file, to: :node
 
   attributes :image
 
   parse_root_in_json true
 
-  def do_maintenance(job)
+  def do_maintenance(job = {})
     case variety
     when 'cloud', 'dynamic'
       if instance
@@ -25,12 +28,12 @@ class NodeInstance
         begin
           self.private_ip_address = instance.private_ip_address
           self.public_ip_address = instance.public_ip_address
-          self.status = instance.state
+          self.status = instance.state.downcase
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
         if instance.respond_to?(:tags) && instance.tags['Name'] != name
-          provider.compute.tags.create(resource_id: entity, key: 'Name', value: name)
+          provider_connection.compute(provider_region).tags.create(resource_id: entity, key: 'Name', value: name)
         end
         self.save if changed?
       end
@@ -43,29 +46,11 @@ class NodeInstance
     end
   end
 
-  def do_create_image(job)
-    sleep 1 until node.node_architecture.init_sync!
+  def do_create_image(job = {})
     image_format = job['options']['image_format']
-    init_dir = Powernode.config(:init_dir)
     Powernode.logger.info "Creating #{image_format} image for instance #{id}."
-    begin
-      FileUtils.mkdir_p(init_dir) unless Dir.exist?(init_dir)
-    rescue => e
-      Powernode.logger.error "Exception: #{e.message}."
-    end
-    begin
-      tmp_dir = Dir.mktmpdir
-    rescue => e
-      Powernode.logger.error "Exception: #{e.message}."
-    end
-    FileUtils.mkdir_p(File.join(tmp_dir, 'boot'))
-    begin
-      FileUtils.cp(File.join(init_dir, "#{node.node_architecture.id}.kernel"), File.join(tmp_dir, 'boot', 'kernel'))
-      FileUtils.cp(File.join(init_dir, "#{node.node_architecture.id}.ramdisk"), File.join(tmp_dir, 'boot', 'ramdisk'))
-    rescue => e
-      Powernode.logger.error "Exception: #{e.message}."
-    end
-    node_identity_file = File.join(tmp_dir, 'identity.cfg')
+    image_dir = node.node_architecture.image_prepare!
+    node_identity_file = File.join(image_dir, 'identity.cfg')
     begin
       File.open(node_identity_file, File::RDWR|File::CREAT, 0644) do |f|
         f.flock(File::LOCK_EX)
@@ -76,7 +61,7 @@ class NodeInstance
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
-    node_config_file = File.join(tmp_dir, 'node.cfg')
+    node_config_file = File.join(image_dir, 'node.cfg')
     begin
       File.open(node_config_file, File::RDWR|File::CREAT, 0644) do |f|
         f.flock(File::LOCK_EX)
@@ -87,27 +72,28 @@ class NodeInstance
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
-    FileUtils.mkdir_p(File.join(tmp_dir, 'boot', 'syslinux'))
-    syslinux_cfg_file = File.join(tmp_dir, 'boot', 'syslinux', 'syslinux.cfg')
+    FileUtils.mkdir_p(File.join(image_dir, 'boot', 'syslinux'))
+    syslinux_cfg_file = File.join(image_dir, 'boot', 'syslinux', 'syslinux.cfg')
+    append = ''
+    if private_ip_static
+      if private_ip_address.present?
+        append += "ip=#{private_ip_address}:" +
+            ":" +
+            "#{private_ip_gateway}:" +
+            "#{private_ip_netmask}:" +
+            "#{name}:" +
+            "#{private_ip_device}:" +
+            "off "
+      end
+    end
+    append += "HOSTNAME=#{name} "
+    append += "DNS_PRIMARY=#{private_ip_primary_dns} " if private_ip_primary_dns.present?
+    append += "DNS_SECONDARY=#{private_ip_secondary_dns} " if private_ip_secondary_dns.present?
+    append += "DNS_DOMAIN=#{private_ip_domain} " if private_ip_domain.present?
     begin
       File.open(syslinux_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
         f.flock(File::LOCK_EX)
-        f << "DEFAULT alchemy\n" +
-            "LABEL alchemy\n" +
-            "LINUX /boot/kernel\n" +
-            "INITRD /boot/ramdisk\n"
-        if private_ip_static
-          f << "APPEND ip=#{private_ip_address}:" +
-              ":" +
-              "#{private_ip_gateway}:" +
-              "#{private_ip_netmask}:" +
-              "#{name}:" +
-              "#{private_ip_device}:" +
-              "off " +
-              "DNS_PRIMARY=#{private_ip_primary_dns} " +
-              "DNS_SECONDARY=#{private_ip_secondary_dns} " +
-              "DNS_DOMAIN=#{private_ip_domain}\n"
-        end
+        f << "APPEND #{append}\n"
         f.flush
         f.truncate(f.pos)
       end
@@ -116,30 +102,30 @@ class NodeInstance
     when 'img'
       begin
         image_file = Tempfile.new([id, '.img'])
-        image_file_size = (`sudo du -bs #{tmp_dir} | cut -f1`.to_i * 1.15).to_i
+        image_file_size = (`sudo du -bs #{image_dir} | cut -f1`.to_i * 1.15).to_i
         image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
-        tmp_dir_mount = Dir.mktmpdir
+        image_dir_mount = Dir.mktmpdir
         system *%W[sudo dd if=/dev/zero of=#{image_file.path} bs=#{Powernode.config(:image_blocksize).to_i} count=#{image_file_blocks}]
         system *%W[sudo mkfs.ext4 -F #{image_file.path}]
-        system *%W[sudo mount -o loop #{image_file.path} #{tmp_dir_mount}]
-        tmp_dir_device = `sudo losetup -j #{image_file.path}`.split(':').first
-        system *%W[sudo cp -a #{File.join(tmp_dir, '.')} #{tmp_dir_mount}]
-        system *%W[sudo dd bs=440 conv=notrunc count=1 if=/usr/lib/syslinux/mbr.bin of=#{tmp_dir_device}]
-        system *%W[sudo extlinux --install #{tmp_dir_mount}/boot]
-        system *%W[sudo umount -l #{tmp_dir_device}]
-        FileUtils.remove_entry_secure(tmp_dir_mount)
+        system *%W[sudo mount -o loop #{image_file.path} #{image_dir_mount}]
+        image_dir_device = `sudo losetup -j #{image_file.path}`.split(':').first
+        system *%W[sudo cp -a #{File.join(image_dir, '.')} #{image_dir_mount}]
+        system *%W[sudo dd bs=440 conv=notrunc count=1 if=/usr/lib/syslinux/mbr.bin of=#{image_dir_device}]
+        system *%W[sudo extlinux --install #{image_dir_mount}/boot]
+        system *%W[sudo umount -l #{image_dir_device}]
+        FileUtils.remove_entry_secure(image_dir_mount)
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
     when 'iso'
       begin
-        FileUtils.cp('/usr/lib/syslinux/isolinux.bin', File.join(tmp_dir, 'boot'))
+        FileUtils.cp('/usr/lib/syslinux/isolinux.bin', File.join(image_dir, 'boot'))
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
       begin
         image_file = Tempfile.new([id, '.img'])
-        system *%W[sudo mkisofs -o #{image_file.path} -V #{name} -b boot/isolinux.bin -c boot/syslinux/boot.cat -r -J -l -quiet -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{tmp_dir}]
+        system *%W[sudo mkisofs -o #{image_file.path} -V #{name} -b boot/isolinux.bin -c boot/syslinux/boot.cat -r -J -l -quiet -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{image_dir}]
         system *%W[sudo isohybrid #{image_file.path} --entry 1 --type 0x83]
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
@@ -155,13 +141,13 @@ class NodeInstance
       end
     end
     FileUtils.remove_entry_secure(image_file)
-    FileUtils.remove_entry_secure(tmp_dir)
+    FileUtils.remove_entry_secure(image_dir)
   end
 
-  def do_exec(job)
+  def do_exec(job = {})
     Powernode.logger.info "Executing (#{job['options']['exec']}) on #{name}."
     begin
-      session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: ssh_key, paranoid: false)
+      session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: key.to_pem, paranoid: false)
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
@@ -181,12 +167,12 @@ class NodeInstance
     response
   end
 
-  def do_public_ip_associate(job)
+  def do_public_ip_associate(job = {})
     Powernode.logger.info "Associating public IP for instance #{id}."
     if public_ip_address.present?
       Powernode.logger.info "Searching for existing public IP #{public_ip_address} for instance #{id}."
       begin
-        address = provider.compute.addresses.find { |a| a.respond_to?(:public_ip) ? a.public_ip == public_ip_address : a.ip == public_ip_address }
+        address = provider_connection.compute(provider_region).addresses.find { |a| a.respond_to?(:public_ip) ? a.public_ip == public_ip_address : a.ip == public_ip_address }
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
@@ -194,7 +180,7 @@ class NodeInstance
     unless address
       begin
         Powernode.logger.info "Searching for unallocated public IP for instance #{id}."
-        address = provider.compute.addresses.find { |a| (a.respond_to?(:allocation_id) ? a.allocation_id.present? : false) && (a.respond_to?(:instance_id) ? a.instance_id.nil? : a.server_id.nil?) }
+        address = provider_connection.compute(provider_region).addresses.find { |a| (a.respond_to?(:allocation_id) ? a.allocation_id.present? : false) && (a.respond_to?(:instance_id) ? a.instance_id.nil? : a.server_id.nil?) }
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
@@ -202,7 +188,7 @@ class NodeInstance
     unless address
       begin
         Powernode.logger.info "Allocating public IP for instance #{id}."
-        address = provider.compute.addresses.create
+        address = provider_connection.compute(provider_region).addresses.create
       rescue => e
         account.notifications.create(category: :error, summary: "Unable to allocate IP for instance #{name}: #{e.message}")
         Powernode.logger.error "Exception: #{e.message}."
@@ -225,9 +211,9 @@ class NodeInstance
     end
   end
 
-  def do_public_ip_disassociate(job)
+  def do_public_ip_disassociate(job = {})
     begin
-      address = provider.compute.addresses.find { |a| a.respond_to?(:public_ip) ? a.public_ip == public_ip_address : a.ip == public_ip_address }
+      address = provider_compute.compute(provider_region).addresses.find { |a| a.respond_to?(:public_ip) ? a.public_ip == public_ip_address : a.ip == public_ip_address }
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
@@ -246,7 +232,7 @@ class NodeInstance
     end
   end
 
-  def do_reboot(job)
+  def do_reboot(job = {})
     Powernode.logger.info "Rebooting instance #{id}."
     begin
       instance.reboot
@@ -256,7 +242,7 @@ class NodeInstance
     end
   end
 
-  def do_start(job)
+  def do_start(job = {})
     Powernode.logger.info "Starting instance #{id}."
     begin
       instance.start
@@ -266,7 +252,7 @@ class NodeInstance
     end
   end
 
-  def do_stop(job)
+  def do_stop(job = {})
     Powernode.logger.info "Stopping instance #{id}."
     begin
       instance.stop
@@ -276,11 +262,11 @@ class NodeInstance
     end
   end
 
-  def do_sync(job)
+  def do_sync(job = {})
     Powernode.logger.info "Syncing instance #{id}."
-    if ssh_ip_address && node.key
+    if ssh_ip_address && ssh_key_data
       begin
-        session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: node.ssh_key, paranoid: false)
+        session = Net::SSH.start(ssh_ip_address, admin_user, key_data: ssh_key, paranoid: false)
         session.exec!('sudo /usr/sbin/ipn -S')
         account.notifications.create(category: :notice, summary: "Instance #{name} synced.")
       rescue => e
@@ -289,7 +275,7 @@ class NodeInstance
     end
   end
 
-  def do_terminate(job)
+  def do_terminate(job = {})
     if instance
       Powernode.logger.info "Terminating instance #{id}."
       begin
@@ -302,14 +288,12 @@ class NodeInstance
   end
 
   def instance
-    unless @instance
-      begin
-        @instance = provider.compute.servers.get(entity)
-        self.status = 'terminated' unless @instance
-        self.save if changed?
-      rescue => e
-        Powernode.logger.error "Exception: #{e.message}."
-      end
+    begin
+      @instance = provider_connection.compute(provider_region).servers.get(entity)
+      self.status = 'terminated' unless @instance
+      self.save if changed?
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
     end
     @instance
   end
@@ -330,14 +314,14 @@ class NodeInstance
   def identity
     <<-EOF.strip_heredoc
       ID=#{id}
-      KEY=#{agent_key}
+      KEY=#{key}
       SERVER=#{node.proxy_url.present? ? node.proxy_url : Powernode.config(:server_url)}/api/node_v1
     EOF
   end
 
   def identity_parameters
     "ID=#{id} " +
-    "KEY=#{agent_key} " +
+    "KEY=#{key} " +
     "SERVER=#{node.proxy_url.present? ? node.proxy_url : Powernode.config(:server_url)}/api/node_v1 "
   end
 

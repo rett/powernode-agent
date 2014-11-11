@@ -74,9 +74,8 @@ Her::API.setup url: Powernode.config(:server_url) + '/api/agent_v1' do |connecti
   connection.use Faraday::Adapter::NetHttp
 end
 
-require_relative 'powernode/extensions'
-require_relative 'powernode/net-ssh'
 require_relative 'powernode/errors'
+require_relative 'powernode/net-ssh'
 require_relative 'powernode/models'
 
 case Powernode.config('smtp_method')
