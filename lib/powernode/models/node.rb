@@ -88,9 +88,6 @@ class Node
         instance_options[:vpc_id]             = provider_network.entity         if provider_network.present?
         instance_options[:flavor_id]          = flavor
         instance_options[:flavor_ref]         = flavor
-
-        Powernode.logger.info "\n\nINSTANCE OPTIONS:\n#{instance_options.inspect}\n"
-
         begin
           cloud_instance = provider_connection.compute(provider_region).servers.create(instance_options)
           cloud_instance.wait_for { state != 'pending' }
