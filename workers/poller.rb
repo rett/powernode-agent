@@ -3,7 +3,6 @@ $:.unshift File.join(File.dirname(__FILE__), '..', 'lib')
 ENV['BUNDLE_GEMFILE'] ||= File.join(File.dirname(__FILE__), '..', 'Gemfile')
 
 require 'powernode'
-require_relative 'agent'
 
 class Poller
   def poll

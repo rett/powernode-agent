@@ -5,11 +5,13 @@ class Account
   has_many :notifications
   has_many :operations
   has_many :provider_connections
+  has_many :provider_networks
+  has_many :provider_network_subnets
   has_many :provider_regions, through: :provider_connections
 
   parse_root_in_json true
 
-  def do_maintenance(job = nil)
+  def do_maintenance(job = {})
     operations.select { |o| !o.async? }.each do |operation|
       if operation.pending? && (!operation.scheduled_at || Time.parse(operation.scheduled_at) < Time.now)
         operation.running!
@@ -36,7 +38,7 @@ class Account
     end
     while running_jobs.size > 0
       running_jobs.keys.each do |operation_id|
-        operation = Operation.find(operation_id)
+        operation = operations.find(operation_id)
         status = Sidekiq::Status::status(running_jobs[operation_id])
         case status
         when :complete

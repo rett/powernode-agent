@@ -6,8 +6,6 @@ class Node
   belongs_to :node_template
   has_many :node_instances
   has_many :node_modules
-  has_many :operations
-  has_many :provider_volumes
 
   delegate :node_architecture, to: :node_template
 
@@ -49,22 +47,24 @@ class Node
       provider_availability_zone  = options['provider_availability_zone']
       provider_region_id          = options['provider_region_id']
       provider_instance_type_id   = options['provider_instance_type_id']
+      provider_network_id         = options['provider_network_id']
       provider_network_subnet_id  = options['provider_network_subnet_id']
       variety                     = options['variety']
-      provider_connection = account.provider_connections.find(provider_connection_id) if provider_connection_id
-      provider_region = account.provider_regions.find(provider_region_id) if provider_region_id
-      provider_instance_type = provider_region.provider_instance_types.find(provider_instance_type_id) if provider_region && provider_instance_type_id
-      provider_network_subnet = provider_region.provider_network_subnets.find(provider_network_subnet_id) if provider_region
-      node_instance = nil
+      provider_connection         = account.provider_connections.find(provider_connection_id)
+      provider_region             = account.provider_regions.find(provider_region_id)                       if provider_region_id
+      provider_instance_type      = provider_region.provider_instance_types.find(provider_instance_type_id) if provider_region
+      provider_network            = account.provider_networks.find(provider_network_id)                     if provider_network_id
+      provider_network_subnet     = account.provider_network_subnets.find(provider_network_subnet_id)       if provider_network_subnet_id
+      node_instance               = NodeInstance.new(id: UUIDTools::UUID.timestamp_create, node_id: id)
       if node_instances.count < instance_limit && ssh_key_data
         Powernode.logger.info "Launching new instance for node #{id}."
-        node_instance = NodeInstance.new(id: UUIDTools::UUID.timestamp_create, node_id: id)
-        node_instance.provider_connection_id = provider_connection.id
-        node_instance.provider_region_id = provider_region.id
-        node_instance.key = SecureRandom.urlsafe_base64(Powernode.config(:instance_key_length))
-        node_instance.availability_zone = provider_availability_zone
-        node_instance.provider_instance_type_id = provider_instance_type_id
-        node_instance.variety = variety
+        node_instance.provider_connection_id      = provider_connection.id if provider_connection
+        node_instance.provider_region_id          = provider_region.id if provider_region
+        node_instance.key                         = SecureRandom.urlsafe_base64(Powernode.config(:instance_key_length))
+        node_instance.availability_zone           = provider_availability_zone
+        node_instance.provider_instance_type_id   = provider_instance_type.id if provider_instance_type
+        node_instance.provider_network_subnet_id  = provider_network_subnet.id if provider_network_subnet
+        node_instance.variety                     = variety
         case provider_connection.variety
         when 'openstack'
           begin
@@ -85,6 +85,8 @@ class Node
         instance_options[:ramdisk_id]         = provider_region.ramdisk_image   if provider_region.ramdisk_image.present?
         instance_options[:region]             = provider_region.region          if provider_region.region.present?
         instance_options[:subnet_id]          = provider_network_subnet.entity  if provider_network_subnet.present?
+        instance_options[:network_id]         = provider_network.entity         if provider_network.present?
+        instance_options[:vpc_id]             = provider_network.entity         if provider_network.present?
         instance_options[:flavor_id]          = flavor
         instance_options[:flavor_ref]         = flavor
         begin
@@ -112,15 +114,15 @@ class Node
             rescue => e
               Powernode.logger.error "Exception: #{e.message}."
             end
-            node_instance = nil
+            node_instance.entity = nil
           end
         end
       else
         Powernode.logger.info 'Account instance limit exceeded, refusing to create instance.'
       end
-      if node_instance && node_instance.variety == 'cloud'
-        account.notifications.create(category: :notice, summary: "Successfully created cloud instance #{node_instance.name}.")
-      elsif node_instance.nil?
+      if node_instance.try(:entity)
+        account.notifications.create(category: :notice, summary: "Successfully created #{node_instance.variety} instance #{node_instance.name}.")
+      else
         account.notifications.create(category: :error, summary: 'Failed to create new instance!')
       end
     end

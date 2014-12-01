@@ -110,3 +110,6 @@ Sidekiq.configure_server do |config|
     chain.add Sidekiq::Status::ClientMiddleware
   end
 end
+
+require_relative '../workers/agent'
+require_relative '../workers/store'
