@@ -13,7 +13,7 @@ class Account
 
   def do_maintenance(job = {})
     operations.select { |o| !o.async? }.each do |operation|
-      if operation.pending? && (!operation.scheduled_at || Time.parse(operation.scheduled_at) < Time.now)
+      if operation.pending? && (!operation.scheduled_at || (Time.parse(operation.scheduled_at) < Time.now))
         operation.running!
         operable = operation.send(operation.operable_type.underscore)
         operable.send('do_' + operation.command, operation.to_hash) if operable.respond_to?('do_' + operation.command)
