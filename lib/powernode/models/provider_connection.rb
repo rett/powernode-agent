@@ -34,9 +34,10 @@ class ProviderConnection
       @provider_options = { provider: variety }
       case variety
       when 'aws'
-        @provider_options[:endpoint] = provider_region.endpoint_url
         @provider_options[:aws_access_key_id] = access_key
         @provider_options[:aws_secret_access_key] = secret_key
+        @provider_options[:endpoint] = provider_region.endpoint_url
+        @provider_options[:region] = provider_region.region if provider_region.region.present?
       when 'openstack'
         @provider_options[:openstack_auth_url] = provider_region.endpoint_url + '/tokens'
         @provider_options[:openstack_username] = access_key
