@@ -51,10 +51,10 @@ class Node
       provider_network_subnet_id  = options['provider_network_subnet_id']
       variety                     = options['variety']
       provider_connection         = account.provider_connections.find(provider_connection_id)
-      provider_region             = account.provider_regions.find(provider_region_id)                             if provider_region_id
-      provider_instance_type      = provider_region.provider_instance_types.find(provider_instance_type_id)       if provider_region
-      provider_network            = account.provider_networks.find(provider_network_id)                           if provider_network_id
-      provider_network_subnet     = provider_network.provider_network_subnets.find(provider_network_subnet_id)[0] if provider_network
+      provider_region             = account.provider_regions.find(provider_region_id)                       if provider_region_id
+      provider_instance_type      = provider_region.provider_instance_types.find(provider_instance_type_id) if provider_region
+      provider_network            = account.provider_networks.find(provider_network_id)                     if provider_network_id
+      provider_network_subnet     = account.provider_network_subnets.find(provider_network_subnet_id)       if provider_network
       node_instance               = NodeInstance.new(id: UUIDTools::UUID.timestamp_create, node_id: id)
       if node_instances.count < instance_limit && ssh_key_data
         Powernode.logger.info "Launching new instance for node #{id}."
