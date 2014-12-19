@@ -11,7 +11,7 @@ class Agent
                     unique: true,
                     expiration: Powernode.config(:agent_job_expiration) })
 
-  def perform(job)
+  def perform(job = {})
     if job['operable_type']
       operable_type = job['operable_type'].classify.constantize
       operable = operable_type.find(job['operable_id'])
