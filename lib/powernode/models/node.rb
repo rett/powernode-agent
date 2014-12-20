@@ -11,6 +11,8 @@ class Node
 
   parse_root_in_json true
 
+  after_find :initialize_ssh_key
+
   def cloud_instances
     node_instances.where(variety: 'cloud')
   end
@@ -140,11 +142,11 @@ class Node
         cipher.encrypt
         cipher.key = encryption_key
         iv = cipher.random_iv
-        encrypted_ssh_key = Base64.encode64(cipher.update(ssh_key) + cipher.final)
+        encrypted_ssh_key = Base64.encode64(cipher.update(ssh_key_data.to_pem) + cipher.final)
       else
-        encrypted_ssh_key = ssh_key
+        encrypted_ssh_key = ssh_key_data.to_pem
       end
-      if ssh_key
+      if ssh_key_data
         body = <<-EOF.strip_heredoc
           Attached is the encrypted SSH key for node #{name}.
 
@@ -191,11 +193,6 @@ class Node
       else
         @ssh_key_data = OpenSSL::PKey::RSA.new(2048)
       end
-      if @ssh_key_data.fingerprint != ssh_key_fingerprint
-        self.ssh_key = @ssh_key_data.to_pem
-        self.ssh_key_fingerprint = @ssh_key_data.fingerprint
-        self.save
-      end
     end
     @ssh_key_data
   end
@@ -228,6 +225,14 @@ class Node
         running_jobs.delete(running_job) if [:complete, :failed, nil].include?(status)
         sleep 1
       end
+    end
+  end
+
+  def initialize_ssh_key
+    if ssh_key != ssh_key_data.to_pem || ssh_key_fingerprint != ssh_key_data.fingerprint
+      self.ssh_key = ssh_key_data.to_pem
+      self.ssh_key_fingerprint = ssh_key_data.fingerprint
+      self.save
     end
   end
 end
