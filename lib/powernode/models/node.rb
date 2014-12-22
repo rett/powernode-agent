@@ -45,28 +45,29 @@ class Node
   def do_create_cloud_instance(job = {})
     options = job['options']
     if options.is_a?(Hash)
-      provider_connection_id      = options['provider_connection_id']
-      provider_availability_zone  = options['provider_availability_zone']
-      provider_region_id          = options['provider_region_id']
-      provider_instance_type_id   = options['provider_instance_type_id']
-      provider_network_id         = options['provider_network_id']
-      provider_network_subnet_id  = options['provider_network_subnet_id']
-      variety                     = options['variety']
-      provider_connection         = account.provider_connections.find(provider_connection_id)
-      provider_region             = account.provider_regions.find(provider_region_id)                       if provider_region_id
-      provider_instance_type      = provider_region.provider_instance_types.find(provider_instance_type_id) if provider_region
-      provider_network            = account.provider_networks.find(provider_network_id)                     if provider_network_id
-      provider_network_subnet     = account.provider_network_subnets.find(provider_network_subnet_id)       if provider_network
-      node_instance               = NodeInstance.new(id: UUIDTools::UUID.timestamp_create, node_id: id)
+      provider_connection_id        = options['provider_connection_id']
+      provider_availability_zone_id = options['provider_availability_zone_id']
+      provider_region_id            = options['provider_region_id']
+      provider_instance_type_id     = options['provider_instance_type_id']
+      provider_network_id           = options['provider_network_id']
+      provider_network_subnet_id    = options['provider_network_subnet_id']
+      variety                       = options['variety']
+      provider_connection           = account.provider_connections.find(provider_connection_id)
+      provider_region               = account.provider_regions.find(provider_region_id)                       if provider_region_id
+      provider_availability_zone    = options['provider_availability_zone']
+      provider_instance_type        = provider_region.provider_instance_types.find(provider_instance_type_id) if provider_region
+      provider_network              = account.provider_networks.find(provider_network_id)                     if provider_network_id
+      provider_network_subnet       = account.provider_network_subnets.find(provider_network_subnet_id)       if provider_network
+      node_instance                 = NodeInstance.new(id: UUIDTools::UUID.timestamp_create, node_id: id)
       if node_instances.count < instance_limit && ssh_key_data
         Powernode.logger.info "Launching new instance for node #{id}."
-        node_instance.provider_connection_id      = provider_connection.id      if provider_connection
-        node_instance.provider_region_id          = provider_region.id          if provider_region
-        node_instance.key                         = SecureRandom.urlsafe_base64(Powernode.config(:instance_key_length))
-        node_instance.availability_zone           = provider_availability_zone
-        node_instance.provider_instance_type_id   = provider_instance_type.id   if provider_instance_type
-        node_instance.provider_network_subnet_id  = provider_network_subnet.id  if provider_network_subnet
-        node_instance.variety                     = variety
+        node_instance.provider_connection_id        = provider_connection.id        if provider_connection.present?
+        node_instance.provider_region_id            = provider_region.id            if provider_region.present?
+        node_instance.key                           = SecureRandom.urlsafe_base64(Powernode.config(:instance_key_length))
+        node_instance.provider_availability_zone_id = provider_availability_zone_id if provider_availability_zone_id.present?
+        node_instance.provider_instance_type_id     = provider_instance_type.id     if provider_instance_type.present?
+        node_instance.provider_network_subnet_id    = provider_network_subnet.id    if provider_network_subnet.present?
+        node_instance.variety                       = variety
         case provider_connection.variety
         when 'openstack'
           begin
