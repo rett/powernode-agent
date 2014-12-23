@@ -1,2 +1,1 @@
-$:.unshift File.dirname(__FILE__)
-require 'rake'
+require 'bundler/gem_tasks'

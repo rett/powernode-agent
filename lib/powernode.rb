@@ -67,16 +67,15 @@ module Powernode
   end
 end
 
-Her::API.setup url: Powernode.config(:server_url) + '/api/agent_v1' do |connection|
+Her::API.setup(url: Powernode.config(:server_url) + '/api/agent_v1', send_only_modified_attributes: true) do |connection|
   connection.use Faraday::Request::BasicAuthentication, Powernode.config(:id), Powernode.config(:key)
   connection.use Faraday::Request::UrlEncoded
   connection.use Her::Middleware::DefaultParseJSON
   connection.use Faraday::Adapter::NetHttp
 end
 
-require_relative 'powernode/extensions'
-require_relative 'powernode/net-ssh'
 require_relative 'powernode/errors'
+require_relative 'powernode/net-ssh'
 require_relative 'powernode/models'
 
 case Powernode.config('smtp_method')
@@ -111,3 +110,6 @@ Sidekiq.configure_server do |config|
     chain.add Sidekiq::Status::ClientMiddleware
   end
 end
+
+require_relative '../workers/agent'
+require_relative '../workers/store'

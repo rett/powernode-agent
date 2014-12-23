@@ -1,5 +1,6 @@
 .bundle
 .idea
+.project
 *.crt
 *.csr
 *.key

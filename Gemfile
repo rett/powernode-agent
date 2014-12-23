@@ -1,5 +1,5 @@
 source 'https://rubygems.org'
-gem 'activesupport', '~> 4.1.6'
+gem 'activesupport', '~> 4.1.7'
 gem 'celluloid', '~> 0.15.2'
 gem 'daemons'
 gem 'faraday'
