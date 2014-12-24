@@ -93,10 +93,11 @@ class NodeArchitecture
     begin
       File.open(syslinux_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
         f.flock(File::LOCK_EX)
-        f << "DEFAULT alchemy\n" +
-            "LABEL alchemy\n" +
-            "LINUX /boot/kernel\n" +
-            "INITRD /boot/ramdisk\n"
+        f << "DEFAULT Node_Alchemy_Init\n" +
+             "LABEL Node_Alchemy_Init\n" +
+             "LINUX /boot/kernel\n" +
+             "INITRD /boot/ramdisk\n" +
+             "APPEND console=tty0 console=ttyS0,115200n8\n"
         f.flush
         f.truncate(f.pos)
       end
