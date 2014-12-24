@@ -53,8 +53,8 @@ class Node
       provider_network_subnet_id    = options['provider_network_subnet_id']
       variety                       = options['variety']
       provider_connection           = account.provider_connections.find(provider_connection_id)
-      provider_region               = account.provider_regions.find(provider_region_id)                       if provider_region_id
       provider_availability_zone    = options['provider_availability_zone']
+      provider_region               = ProviderRegion.find(provider_region_id)                                 if provider_region_id
       provider_instance_type        = provider_region.provider_instance_types.find(provider_instance_type_id) if provider_region
       provider_network              = account.provider_networks.find(provider_network_id)                     if provider_network_id
       provider_network_subnet       = account.provider_network_subnets.find(provider_network_subnet_id)       if provider_network
