@@ -28,7 +28,7 @@ class NodeArchitecture
     end
     if image_file && image_file.size > 0
       payload = { image: Faraday::UploadIO.new(image_file.path, 'application/octet-stream') }
-      response = Powernode.server.post("architectures/#{id}/upload/image", payload)
+      response = Powernode.server.post("node_architectures/#{id}/upload/image", payload)
       if response.status == 200
         account.notifications.create(category: :notice, summary: "Image created for architecture #{name}.")
       else
@@ -51,7 +51,7 @@ class NodeArchitecture
         begin
           File.open(init_resource, File::RDWR|File::CREAT, 0644) do |f|
             if f.flock(File::LOCK_NB|File::LOCK_EX)
-              response = Powernode.server.get("architectures/#{id}/download/#{resource}")
+              response = Powernode.server.get("node_architectures/#{id}/download/#{resource}")
               if response.status == 200
                 f.write(response.body)
                 f.flush
