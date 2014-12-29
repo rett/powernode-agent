@@ -201,7 +201,7 @@ class Node
   def ssh_key_file
     FileUtils.mkdir_p(Powernode.config(:ssh_key_dir)) unless Dir.exist?(Powernode.config(:ssh_key_dir))
     key_file = File.join(Powernode.config(:ssh_key_dir), "#{id}.pem")
-    unless ssh_key_data.to_pem == File.read(key_file)
+    unless File.exist?(key_file) && ssh_key_data.to_pem == File.read(key_file)
       File.open(key_file, File::RDWR|File::CREAT, 0600) do |f|
         f.flock(File::LOCK_EX)
         f.write(ssh_key_data.to_pem)
