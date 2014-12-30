@@ -54,8 +54,8 @@ class Node
       variety                       = options['variety']
       provider_connection           = account.provider_connections.find(provider_connection_id)
       provider_region               = account.provider_regions.find(provider_region_id)                       if provider_region_id
-      provider_availability_zone    = options['provider_availability_zone']
-      provider_instance_type        = provider_region.provider_instance_types.find(provider_instance_type_id) if provider_region
+      provider_availability_zone    = account.provider_availability_zones.find(provider_availability_zone_id) if provider_availability_zone_id
+      provider_instance_type        = account.provider_instance_types.find(provider_instance_type_id)         if provider_region
       provider_network              = account.provider_networks.find(provider_network_id)                     if provider_network_id
       provider_network_subnet       = account.provider_network_subnets.find(provider_network_subnet_id)       if provider_network
       node_instance                 = NodeInstance.new(id: UUIDTools::UUID.timestamp_create, node_id: id)
@@ -64,7 +64,7 @@ class Node
         node_instance.provider_connection_id        = provider_connection.id        if provider_connection.present?
         node_instance.provider_region_id            = provider_region.id            if provider_region.present?
         node_instance.key                           = SecureRandom.urlsafe_base64(Powernode.config(:instance_key_length))
-        node_instance.provider_availability_zone_id = provider_availability_zone_id if provider_availability_zone_id.present?
+        node_instance.provider_availability_zone_id = provider_availability_zone.id if provider_availability_zone.present?
         node_instance.provider_instance_type_id     = provider_instance_type.id     if provider_instance_type.present?
         node_instance.provider_network_subnet_id    = provider_network_subnet.id    if provider_network_subnet.present?
         node_instance.variety                       = variety
@@ -81,15 +81,15 @@ class Node
         instance_options = {}
         instance_options[:name]               = node_instance.id
         instance_options[:user_data]          = node_instance.identity
-        instance_options[:availability_zone]  = provider_availability_zone      if provider_availability_zone.present?
-        instance_options[:image_id]           = provider_region.machine_image   if provider_region.machine_image.present?
-        instance_options[:image_ref]          = provider_region.machine_image   if provider_region.machine_image.present?
-        instance_options[:kernel_id]          = provider_region.kernel_image    if provider_region.kernel_image.present?
-        instance_options[:ramdisk_id]         = provider_region.ramdisk_image   if provider_region.ramdisk_image.present?
-        instance_options[:region]             = provider_region.region          if provider_region.region.present?
-        instance_options[:network_id]         = provider_network.entity         if provider_network.present?
-        instance_options[:subnet_id]          = provider_network_subnet.entity  if provider_network_subnet.present?
-        instance_options[:vpc_id]             = provider_network.entity         if provider_network.present?
+        instance_options[:availability_zone]  = provider_availability_zone.entity if provider_availability_zone.present?
+        instance_options[:image_id]           = provider_region.machine_image     if provider_region.machine_image.present?
+        instance_options[:image_ref]          = provider_region.machine_image     if provider_region.machine_image.present?
+        instance_options[:kernel_id]          = provider_region.kernel_image      if provider_region.kernel_image.present?
+        instance_options[:ramdisk_id]         = provider_region.ramdisk_image     if provider_region.ramdisk_image.present?
+        instance_options[:region]             = provider_region.region            if provider_region.region.present?
+        instance_options[:network_id]         = provider_network.entity           if provider_network.present?
+        instance_options[:subnet_id]          = provider_network_subnet.entity    if provider_network_subnet.present?
+        instance_options[:vpc_id]             = provider_network.entity           if provider_network.present?
         instance_options[:flavor_id]          = flavor
         instance_options[:flavor_ref]         = flavor
         begin
@@ -201,7 +201,7 @@ class Node
   def ssh_key_file
     FileUtils.mkdir_p(Powernode.config(:ssh_key_dir)) unless Dir.exist?(Powernode.config(:ssh_key_dir))
     key_file = File.join(Powernode.config(:ssh_key_dir), "#{id}.pem")
-    unless ssh_key_data.to_pem == File.read(key_file)
+    unless File.exist?(key_file) && ssh_key_data.to_pem == File.read(key_file)
       File.open(key_file, File::RDWR|File::CREAT, 0600) do |f|
         f.flock(File::LOCK_EX)
         f.write(ssh_key_data.to_pem)

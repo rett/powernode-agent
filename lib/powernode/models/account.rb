@@ -4,10 +4,12 @@ class Account
   has_many :nodes
   has_many :notifications
   has_many :operations
+  has_many :provider_availability_zones
   has_many :provider_connections
+  has_many :provider_instance_types
   has_many :provider_networks
   has_many :provider_network_subnets
-  has_many :provider_regions, through: :provider_connections
+  has_many :provider_regions
 
   parse_root_in_json true
 
