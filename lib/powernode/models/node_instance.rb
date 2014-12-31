@@ -264,7 +264,7 @@ class NodeInstance
 
   def do_sync(job = {})
     Powernode.logger.info "Syncing instance #{id}."
-    if ssh_ip_address && ssh_key
+    if ssh_ip_address && ssh_key && ssh_key_file
       begin
         session = Net::SSH.start(ssh_ip_address, admin_user, key_data: ssh_key, paranoid: false)
         session.exec!('sudo /usr/sbin/ipn -S')
