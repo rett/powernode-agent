@@ -28,7 +28,11 @@ class Poller
   end
 end
 
-poller = Poller.new
-Powernode.logger.warn 'Poller started.'
-poller.poll while true
-Powernode.logger.warn 'Poller stopped.'
+if Powernode.config('enable_poller')
+  poller = Poller.new
+  Powernode.logger.warn 'Poller started.'
+  poller.poll while true
+  Powernode.logger.warn 'Poller stopped.'
+else
+  Powernode.logger.warn 'Poller disabled.'
+end
