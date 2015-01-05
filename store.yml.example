@@ -1,4 +1,5 @@
 :verbose: false
 :concurrency:  3
+:logfile: /dev/null
 :queues:
   - [store, 10]

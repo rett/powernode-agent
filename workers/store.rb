@@ -6,10 +6,9 @@ require 'powernode'
 
 class Store
   include Sidekiq::Worker
-
   sidekiq_options({ queue: Powernode.config(:store_queue),
                     retry: Powernode.config(:store_job_retries),
-                    unique: :all,
+                    unique: true,
                     expiration: Powernode.config(:store_job_expiration) })
 
   def perform(job)
