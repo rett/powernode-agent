@@ -1,6 +1,9 @@
 #!/usr/bin/env ruby
 require 'daemons'
+require 'yaml'
+
 basedir = File.join(File.dirname(__FILE__), '..')
+config = YAML::load(File.read(File.join(basedir, 'config.yml')))
 
 daemon_options = {
   :app_name   => 'poller',
@@ -10,4 +13,4 @@ daemon_options = {
   :monitor    => true
 }
 
-Daemons.run(File.join(basedir, 'workers', 'poller.rb'), daemon_options)
+Daemons.run(File.join(basedir, 'workers', 'poller.rb'), daemon_options) if config['enable_poller']

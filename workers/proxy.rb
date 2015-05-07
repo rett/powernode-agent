@@ -97,9 +97,6 @@ class Proxy < Sinatra::Base
   end
 end
 
-if Powernode.config('enable_proxy')
-  Powernode.logger.warn "Proxy started."
-  Proxy.run!
-else
-  Powernode.logger.warn "Proxy disabled."
-end
+Powernode.logger.warn "Proxy started."
+Proxy.run!
+Powernode.logger.warn "Proxy stopped."
