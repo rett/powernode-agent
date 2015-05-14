@@ -1,9 +1,8 @@
 class NodeArchitecture
   include Her::Model
+  parse_root_in_json true
 
   belongs_to :account
-
-  parse_root_in_json true
 
   def do_create_image(job = {})
     Powernode.logger.info "Creating image for architecture #{id}."

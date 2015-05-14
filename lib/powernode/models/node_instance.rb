@@ -1,5 +1,7 @@
 class NodeInstance
   include Her::Model
+  attributes :image
+  parse_root_in_json true
 
   belongs_to :node
   belongs_to :provider_connection
@@ -16,9 +18,9 @@ class NodeInstance
   delegate :ssh_key_data, to: :node
   delegate :ssh_key_file, to: :node
 
-  attributes :image
-
-  parse_root_in_json true
+  def compute
+    provider_connection.compute(provider_region)
+  end
 
   def do_maintenance(job = {})
     case variety
@@ -26,14 +28,14 @@ class NodeInstance
       if instance
         Powernode.logger.info "Updating cloud instance #{id}."
         begin
-          self.private_ip_address = instance.private_ip_address
-          self.public_ip_address = instance.public_ip_address
-          self.status = instance.state.downcase
+          self.private_ip_address = instance.private_ip_address.to_s if self.private_ip_address != instance.private_ip_address.to_s
+          self.public_ip_address = instance.public_ip_address.to_s if self.public_ip_address != instance.public_ip_address.to_s
+          self.status = instance.state.downcase if status != instance.state.downcase
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
         if instance.respond_to?(:tags) && instance.tags['Name'] != name
-          provider_connection.compute(provider_region).tags.create(resource_id: entity, key: 'Name', value: name)
+          compute.tags.create(resource_id: entity, key: 'Name', value: name)
         end
         self.save if changed?
       end
@@ -44,6 +46,7 @@ class NodeInstance
     when 'terminated'
       self.destroy
     end
+    true
   end
 
   def do_create_image(job = {})
@@ -169,26 +172,21 @@ class NodeInstance
 
   def do_public_ip_associate(job = {})
     Powernode.logger.info "Associating public IP for instance #{id}."
-    if public_ip_address.present?
-      Powernode.logger.info "Searching for existing public IP #{public_ip_address} for instance #{id}."
-      begin
-        address = provider_connection.compute(provider_region).addresses.find { |a| a.respond_to?(:public_ip) ? a.public_ip == public_ip_address : a.ip == public_ip_address }
-      rescue => e
-        Powernode.logger.error "Exception: #{e.message}."
+    begin
+      Powernode.logger.info "Searching for unallocated public IP for instance #{id}."
+      case provider_connection.variety
+      when 'aws'
+        address = [compute.addresses.find { |a| a.allocation_id.nil? }].first
+      else
+        address = [compute.addresses.find { |a| a.instance_id.nil? }].first
       end
-    end
-    unless address
-      begin
-        Powernode.logger.info "Searching for unallocated public IP for instance #{id}."
-        address = provider_connection.compute(provider_region).addresses.find { |a| (a.respond_to?(:allocation_id) ? a.allocation_id.present? : false) && (a.respond_to?(:instance_id) ? a.instance_id.nil? : a.server_id.nil?) }
-      rescue => e
-        Powernode.logger.error "Exception: #{e.message}."
-      end
+    rescue => e
+      Powernode.logger.error "Exception: #{e.message}."
     end
     unless address
       begin
         Powernode.logger.info "Allocating public IP for instance #{id}."
-        address = provider_connection.compute(provider_region).addresses.create
+        address = compute.addresses.create
       rescue => e
         account.notifications.create(category: :error, summary: "Unable to allocate IP for instance #{name}: #{e.message}")
         Powernode.logger.error "Exception: #{e.message}."
@@ -213,7 +211,7 @@ class NodeInstance
 
   def do_public_ip_disassociate(job = {})
     begin
-      address = provider_compute.compute(provider_region).addresses.find { |a| a.respond_to?(:public_ip) ? a.public_ip == public_ip_address : a.ip == public_ip_address }
+      address = compute.addresses.find { |a| a.respond_to?(:public_ip) ? a.public_ip == public_ip_address : a.ip == public_ip_address }
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
@@ -289,7 +287,7 @@ class NodeInstance
 
   def instance
     begin
-      @instance = provider_connection.compute(provider_region).servers.get(entity)
+      @instance = compute.servers.get(entity)
       self.status = 'terminated' unless @instance
       self.save if changed?
     rescue => e

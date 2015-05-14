@@ -1,5 +1,6 @@
 class ProviderVolume
   include Her::Model
+  parse_root_in_json true
 
   STATUSES = %w[attached available pending provisioning]
 
@@ -9,8 +10,6 @@ class ProviderVolume
   belongs_to :provider
   has_many   :provider_volume_members
   has_many   :provider_volume_snapshots
-
-  parse_root_in_json true
 
   ProviderVolume::STATUSES.each do |s|
     define_method(s + '?') do

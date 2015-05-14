@@ -1,5 +1,6 @@
 class Account
   include Her::Model
+  parse_root_in_json true
 
   has_many :nodes
   has_many :notifications
@@ -10,8 +11,6 @@ class Account
   has_many :provider_networks
   has_many :provider_network_subnets
   has_many :provider_regions
-
-  parse_root_in_json true
 
   def do_maintenance(job = {})
     operations.select { |o| !o.async? }.each do |operation|
@@ -61,4 +60,5 @@ class Account
       Agent.perform_async({ command: command, operable_type: 'node', operable_id: node.id })
     end
   end
+  true
 end

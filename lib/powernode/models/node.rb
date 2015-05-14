@@ -1,5 +1,6 @@
 class Node
   include Her::Model
+  parse_root_in_json true
 
   belongs_to :account
   belongs_to :node_platform
@@ -8,8 +9,6 @@ class Node
   has_many :node_modules
 
   delegate :node_architecture, to: :node_template
-
-  parse_root_in_json true
 
   after_find :initialize_ssh_key
 
@@ -40,6 +39,7 @@ class Node
     elsif dynamic_instances.count > 0
       terminate_dynamic_instances!(dynamic_instances.count)
     end
+    true
   end
 
   def do_create_cloud_instance(job = {})

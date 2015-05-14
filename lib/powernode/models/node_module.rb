@@ -1,9 +1,8 @@
 class NodeModule
   include Her::Model
+  parse_root_in_json true
 
   belongs_to :account
-
-  parse_root_in_json true
 
   def do_build(job = {})
     node = account.nodes.find(job['options']['node_id'])

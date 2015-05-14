@@ -1,11 +1,11 @@
 class ProviderVolumeMember
   include Her::Model
+  parse_root_in_json true
 
   STATUSES = %w[available creating provisioning]
 
+  belongs_to :account
   belongs_to :provider_volume
-
-  parse_root_in_json true
 
   ProviderVolumeMember::STATUSES.each do |s|
     define_method(s + '?') do

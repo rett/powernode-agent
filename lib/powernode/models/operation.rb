@@ -1,11 +1,10 @@
 class Operation
   include Her::Model
+  parse_root_in_json true
 
   belongs_to :account
 
   STATUSES = %w[complete failed pending running]
-
-  parse_root_in_json true
 
   Operation::STATUSES.each do |s|
     define_method(s + '?') do
