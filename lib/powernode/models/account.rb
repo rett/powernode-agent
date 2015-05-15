@@ -29,7 +29,7 @@ class Account
     running_jobs = {}
     operations.select { |o| o.async? }.each do |operation|
       if operation.pending? && (!operation.scheduled_at || Time.parse(operation.scheduled_at) < Time.now)
-        operation.running! if running_jobs[operation.id] = Agent.perform_async(operation.to_hash.merge({ unique: UUIDTools::UUID.timestamp_create}))
+        operation.running! if (running_jobs[operation.id] = Agent.perform_async(operation.to_hash.merge({ unique: UUIDTools::UUID.timestamp_create})))
       elsif operation.running?
         notifications.create(category: :error, summary: "#{operation.description} failed unexpectedly!")
         operation.failed!
