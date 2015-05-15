@@ -52,13 +52,6 @@ class Account
         sleep 1
       end
     end
-    command = 'maintenance'
-    provider_connections.each do |provider_connection|
-      Agent.perform_async({ command: command, operable_type: 'provider_connection', operable_id: provider_connection.id })
-    end
-    nodes.each do |node|
-      Agent.perform_async({ command: command, operable_type: 'node', operable_id: node.id })
-    end
     true
   end
 end

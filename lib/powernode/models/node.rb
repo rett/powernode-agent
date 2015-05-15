@@ -33,7 +33,7 @@ class Node
       command = 'maintenance'
       node_instances.each do |node_instance|
         if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
-          Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
+          Powernode.logger.info "Queued #{command} for instance #{node_instance.id}."
         end
       end
     elsif dynamic_instances.count > 0

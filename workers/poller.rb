@@ -7,9 +7,16 @@ require 'powernode'
 class Poller
   def poll
     begin
+      command = 'maintenance'
       Account.all.each do |account|
-        command = 'maintenance'
-        Agent.perform_async({ command: command, operable_type: 'account', operable_id: account.id })
+        if Agent.perform_async({ command: command, operable_type: 'account', operable_id: account.id })
+          Powernode.logger.info "Queued #{command} for account #{account.id}."
+        end
+      end
+      Node.all.each do |node|
+        if Agent.perform_async({ command: command, operable_type: 'node', operable_id: node.id })
+          Powernode.logger.info "Queued #{command} for node #{node.id}."
+        end
       end
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
