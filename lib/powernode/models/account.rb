@@ -59,6 +59,6 @@ class Account
     nodes.each do |node|
       Agent.perform_async({ command: command, operable_type: 'node', operable_id: node.id })
     end
+    true
   end
-  true
 end
