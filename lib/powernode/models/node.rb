@@ -135,18 +135,14 @@ class Node
     options = job['options']
     if options.is_a?(Hash)
       recipient = options['recipient']
-      encryption_key = options['ssh_encryption_key']
       Powernode.logger.info "Sending SSH key to #{recipient}."
-      if ssh_key && encryption_key && encryption_key.is_a?(String) && encryption_key.length == Powernode.config(:encryption_key_length)
-        encryption_key = [encryption_key].pack('H*')
-        cipher = OpenSSL::Cipher.new(Powernode.config(:encryption_cipher))
-        cipher.encrypt
-        cipher.key = encryption_key
-        iv = cipher.random_iv
-        encrypted_ssh_key = Base64.encode64(cipher.update(ssh_key_data.to_pem) + cipher.final)
-      else
-        encrypted_ssh_key = ssh_key_data.to_pem
-      end
+      encryption_key = options['ssh_encryption_key']
+      encryption_key = [encryption_key].pack('H*')
+      cipher = OpenSSL::Cipher.new(Powernode.config(:encryption_cipher))
+      cipher.encrypt
+      cipher.key = encryption_key
+      iv = cipher.random_iv
+      encrypted_ssh_key = Base64.encode64(cipher.update(ssh_key_data.to_pem) + cipher.final)
       if ssh_key_data
         body = <<-EOF.strip_heredoc
           Attached is the encrypted SSH key for node #{name}.

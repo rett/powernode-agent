@@ -7,6 +7,7 @@ enable_proxy: false
 proxy_url:
 realm: Node Alchemy
 domain: example.com
+encryption_cipher: aes-256-cbc
 module_compression: xz
 checksum_bitlength: 256
 instance_key_length: 32
