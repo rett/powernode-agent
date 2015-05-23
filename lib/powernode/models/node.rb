@@ -125,8 +125,10 @@ class Node
       end
       if node_instance.try(:entity)
         account.notifications.create(category: :notice, summary: "Successfully created #{node_instance.variety} instance #{node_instance.name}.")
+        true
       else
         account.notifications.create(category: :error, summary: 'Failed to create new instance!')
+        false
       end
     end
   end
@@ -172,6 +174,7 @@ class Node
         account.notifications.create(category: :alert, summary: "SSH key not found for node #{name}")
       end
     end
+    true
   end
 
   def do_sync_cloud_instances(job = {})
@@ -181,6 +184,8 @@ class Node
         Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
       end
     end
+    account.notifications.create(category: :notice, summary: "Scheduled cloud instance synchronization for #{name}.")
+    true
   end
 
   def ssh_key_data
