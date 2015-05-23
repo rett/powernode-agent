@@ -4,7 +4,7 @@ BASEDIR="$(dirname $0)"
 
 if [ "${1}" ]; then
   for SERVICE in agent poller proxy store; do
-    bundle exec "${BASEDIR}/${SERVICE}" "${1}"
+    "${BASEDIR}/${SERVICE}" "${1}"
   done
 else
   echo "Syntax: control [start|status|stop|restart]"

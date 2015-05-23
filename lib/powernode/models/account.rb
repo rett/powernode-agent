@@ -52,6 +52,10 @@ class Account
         sleep 1
       end
     end
+    command = 'maintenance'
+    nodes.each do |node|
+      Agent.perform_async({ command: command, operable_type: 'node', operable_id: node.id })
+    end
     true
   end
 end

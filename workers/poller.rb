@@ -13,11 +13,6 @@ class Poller
           Powernode.logger.info "Queued #{command} for account #{account.id}."
         end
       end
-      Node.all.each do |node|
-        if Agent.perform_async({ command: command, operable_type: 'node', operable_id: node.id })
-          Powernode.logger.info "Queued #{command} for node #{node.id}."
-        end
-      end
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
     end
