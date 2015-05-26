@@ -96,7 +96,11 @@ class NodeInstance
     begin
       File.open(syslinux_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
         f.flock(File::LOCK_EX)
-        f << "APPEND #{append}\n"
+        f << "DEFAULT alchemy\n" +
+             "LABEL alchemy\n" +
+             "LINUX /boot/kernel\n" +
+             "INITRD /boot/ramdisk\n" +
+             "APPEND #{append}\n"
         f.flush
         f.truncate(f.pos)
       end
