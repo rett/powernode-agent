@@ -178,13 +178,13 @@ class Node
   end
 
   def do_sync_cloud_instances(job = {})
+    account.notifications.create(category: :notice, summary: "Scheduled cloud instance synchronization for #{name}.")
     command = 'sync'
     (cloud_instances + dynamic_instances).each do |node_instance|
       if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
         Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
       end
     end
-    account.notifications.create(category: :notice, summary: "Scheduled cloud instance synchronization for #{name}.")
     true
   end
 
