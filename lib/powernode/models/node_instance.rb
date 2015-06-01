@@ -180,9 +180,9 @@ class NodeInstance
       Powernode.logger.info "Searching for unallocated public IP for instance #{id}."
       case provider_connection.variety
       when 'aws'
-        address = [compute.addresses.find { |a| a.allocation_id.nil? }].first
+        address = [compute.addresses.find { |a| !a.server_id && a.domain == 'vpc' }].first
       else
-        address = [compute.addresses.find { |a| a.instance_id.nil? }].first
+        address = [compute.addresses.find { |a| !a.instance_id }].first
       end
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."
