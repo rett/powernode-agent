@@ -43,15 +43,14 @@ class Node
   end
 
   def do_create_cloud_instance(job = {})
-    options = job['options']
-    if options.is_a?(Hash)
-      provider_connection_id        = options['provider_connection_id']
-      provider_availability_zone_id = options['provider_availability_zone_id']
-      provider_region_id            = options['provider_region_id']
-      provider_instance_type_id     = options['provider_instance_type_id']
-      provider_network_id           = options['provider_network_id']
-      provider_network_subnet_id    = options['provider_network_subnet_id']
-      variety                       = options['variety']
+    if (operation = Operation.find(job['id']))
+      provider_connection_id        = operation.options['provider_connection_id']
+      provider_availability_zone_id = operation.options['provider_availability_zone_id']
+      provider_region_id            = operation.options['provider_region_id']
+      provider_instance_type_id     = operation.options['provider_instance_type_id']
+      provider_network_id           = operation.options['provider_network_id']
+      provider_network_subnet_id    = operation.options['provider_network_subnet_id']
+      variety                       = operation.options['variety']
       provider_connection           = account.provider_connections.find(provider_connection_id)
       provider_region               = account.provider_regions.find(provider_region_id)                       if provider_region_id
       provider_availability_zone    = account.provider_availability_zones.find(provider_availability_zone_id) if provider_availability_zone_id
@@ -124,21 +123,20 @@ class Node
         Powernode.logger.info 'Account instance limit exceeded, refusing to create instance.'
       end
       if node_instance.try(:entity)
-        account.notifications.create(category: :notice, summary: "Successfully created #{node_instance.variety} instance #{node_instance.name}.")
+        operation.add_event!(:info, "Successfully created #{node_instance.variety} instance #{node_instance.name}.")
         true
       else
-        account.notifications.create(category: :error, summary: 'Failed to create new instance!')
+        operation.add_event!(:danger, 'Failed to create new instance!')
         false
       end
     end
   end
 
   def do_send_ssh_key(job = {})
-    options = job['options']
-    if options.is_a?(Hash)
-      recipient = options['recipient']
+    if (operation = Operation.find(job['id']))
+      recipient = operation.options['recipient']
       Powernode.logger.info "Sending SSH key to #{recipient}."
-      encryption_key = options['ssh_encryption_key']
+      encryption_key = operation.options['ssh_encryption_key']
       encryption_key = [encryption_key].pack('H*')
       cipher = OpenSSL::Cipher.new(Powernode.config(:encryption_cipher))
       cipher.encrypt
@@ -166,26 +164,32 @@ class Node
                     subject: "SSH key for #{name}",
                     body: body,
                     attachments: { "#{name}.txt" => encrypted_ssh_key })
-          account.notifications.create(category: :notice, summary: "SSH key for #{name} delivered to #{recipient}")
+          operation.add_event!(:info, "SSH key for #{name} delivered to #{recipient}")
         rescue => e
+          operation.add_event!(:alert, "Exception: #{e.message}.")
           Powernode.logger.error "Exception: #{e.message}."
         end
       else
-        account.notifications.create(category: :alert, summary: "SSH key not found for node #{name}")
+        operation.add_event!(:alert, "SSH key not found for node #{name}")
       end
     end
     true
   end
 
   def do_sync_cloud_instances(job = {})
-    account.notifications.create(category: :notice, summary: "Scheduled cloud instance synchronization for #{name}.")
     command = 'sync'
-    (cloud_instances + dynamic_instances).each do |node_instance|
-      if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
-        Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
+    if (operation = Operation.find(job['id']))
+      instances = (cloud_instances + dynamic_instances)
+      instances.each do |node_instance|
+        if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
+          Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
+        end
       end
+      operation.add_event!(:info, 'Cloud instance sync queued.')
+      true
+    else
+      false
     end
-    true
   end
 
   def ssh_key_data

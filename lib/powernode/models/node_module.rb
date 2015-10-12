@@ -5,16 +5,16 @@ class NodeModule
   belongs_to :account
 
   def do_build(job = {})
-    if job['options'] && (node_instance = NodeInstance.find(job['options']['node_instance_id']))
+    if (operation = Operation.find(job['id'])) && (node_instance = NodeInstance.find(operation.options['node_instance_id']))
       if package_spec.empty?
-        Powernode.logger.info "Commit aborted: No package specification."
-        node_instance.account.notifications.create(category: :error, summary: "Build aborted for module #{name}: No package specification")
+        Powernode.logger.info 'Commit aborted: No package specification.'
+        operation.add_event!(:danger, 'Build aborted: No package specification')
       elsif lock_spec?
-        Powernode.logger.info "Commit aborted: Spec locked."
-        node_instance.account.notifications.create(category: :error, summary: "Build aborted for module #{name}: Spec locked")
+        Powernode.logger.info 'Commit aborted: Spec locked.'
+        operation.add_event!(:danger, 'Commit aborted: Spec locked.')
       elsif !node_instance
         Powernode.logger.info "Commit aborted: Node instance not available."
-        node_instance.account.notifications.create(category: :error, summary: "Build aborted for module #{name}: Node instance not available")
+        operation.add_event!(:danger, 'Commit aborted: Node instance not available.')
       else
         Powernode.logger.info "Building module #{id} on instance #{node_instance.id}."
         begin
@@ -23,7 +23,7 @@ class NodeModule
                                    key_data: node_instance.ssh_key)
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
-          node_instance.account.notifications.create(category: :error, summary: "Error connecting to instance #{node_instance}\n#{e.message}")
+          operation.add_event!(:danger, "Error connecting to instance #{node_instance}\n#{e.message}")
         end
         if session
           begin
@@ -32,11 +32,11 @@ class NodeModule
             error = response[:stderr]
             exit_code = response[:exit_code]
             if exit_code != 0
-              node_instance.account.notifications.create(category: :error, summary: "Error installing packages for module #{name}\n\n#{output}\n\n#{error}")
+              operation.add_event!(:danger, "Error installing packages for module #{name}\n\n#{output}\n\n#{error}")
             end
           rescue => e
             Powernode.logger.error "Exception: #{e.message}."
-            node_instance.account.notifications.create(category: :error, summary: "Error installing packages for module #{name}\n\n#{e.message}")
+            operation.add_event!(:danger, "Error installing packages for module #{name}\n\n#{e.message}")
           end
           if exit_code == 0
             Powernode.logger.info "Uploading spec for module #{id}."
@@ -44,12 +44,13 @@ class NodeModule
               spec = session.exec!("cat /tmp/#{id}.spec")
               response = Powernode.server.post("node_modules/#{id}/upload/spec", { spec: spec })
               if response.status == 200
-                node_instance.account.notifications.create(category: :notice, summary: "Module spec created for module #{name}.")
+                operation.add_event!(:info, "Module spec created for module #{name}.")
               else
-                node_instance.account.notifications.create(category: :error, summary: "Failed to create spec for module #{name}.")
+                operation.add_event!(:danger, "Failed to create spec for module #{name}.")
               end
             rescue => e
               Powernode.logger.error "Exception: #{e.message}."
+
             end
           end
         end
@@ -61,10 +62,9 @@ class NodeModule
   end
 
   def do_commit(job = {})
-    if job['options'] && (node_instance = NodeInstance.find(job['options']['node_instance_id']))
+    if (operation.find(job['id'])) && (node_instance = NodeInstance.find(operation.options['node_instance_id']))
       if rsync_spec.empty?
-        Powernode.logger.info "Commit aborted: No module specification."
-        node_instance.account.notifications.create(category: :error, summary: "Commit aborted for module #{name}: No module specification")
+        operation.add_event!(:danger, "Commit aborted for module #{name}: No module specification")
       else
         Powernode.logger.info "Committing module #{id}."
         tmp_dir = Dir.mktmpdir("#{id}")
@@ -78,6 +78,7 @@ class NodeModule
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
+        operation.set_progress!(20)
         if File.directory?(tmp_dir)
           begin
             system *%W[sudo chown root:root #{tmp_dir}]
@@ -92,18 +93,20 @@ class NodeModule
           case $?.exitstatus
           when 23
             Powernode.logger.warn "Not all files transferred for module #{id}."
-            node_instance.account.notifications.create(category: :warning, summary: "Not all files transferred for module #{name}")
+            operation.add_event!(:danger, "Not all files transferred for module #{name}")
           when 255
-            Powernode.logger.error "Unable to connect."
-            node_instance.account.notifications.create(category: :alert, summary: "Unable to connect to instance #{node_instance.name}")
+            Powernode.logger.error "Unable to connect to instance #{node_instance.id}"
+            operation.add_event!(:danger, "Unable to connect to instance #{node_instance.name}")
             system *%W[sudo rm -rf #{tmp_dir}]
           end
         end
         tmp_spec.unlink
+        operation.set_progress!(30)
         if File.directory?(tmp_dir)
           tmp_module = Tempfile.new([id, '.mo'])
           begin
             system *%W[sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config(:module_compression)} -noappend -no-progress]
+            operation.set_progress!(40)
           rescue => e
             Powernode.logger.error "Exception: #{e.message}."
           end
@@ -111,11 +114,12 @@ class NodeModule
             payload = { data: Faraday::UploadIO.new(tmp_module.path, 'application/octet-stream') }
             response = Powernode.server.post("node_modules/#{id}/upload/data", payload)
             if response.status == 200
-              node_instance.account.notifications.create(category: :notice, summary: "Committed #{name} from instance #{node_instance.name}")
+              operation.add_event!(:info, "Committed #{name} from instance #{node_instance.name}")
             else
-              node_instance.account.notifications.create(category: :error, summary: "Failed to commit #{name} from instance #{node_instance.name}")
+              operation.add_event!(:danger, "Failed to commit #{name} from instance #{node_instance.name}")
             end
             FileUtils.remove_entry_secure(tmp_module, force: true)
+            operation.set_progress!(60)
             begin
               system *%W[sudo rm -rf #{tmp_dir}]
             rescue => e
@@ -133,8 +137,8 @@ class NodeModule
       end
       true
     else
-      Powernode.logger.info "Commit aborted: Node instance not available."
-      account.notifications.create(category: :error, summary: "Commit aborted for module #{name}: Node instance not available")
+      Powernode.logger.info "Commit aborted for module #{id}: Node instance not available"
+      operation.add_event!(:danger, "Commit aborted for module #{name}: Node instance not available")
       false
     end
   end

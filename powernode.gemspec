@@ -28,7 +28,6 @@ Gem::Specification.new do |spec|
     lib/powernode/models/node_module.rb
     lib/powernode/models/node_platform.rb
     lib/powernode/models/node_template.rb
-    lib/powernode/models/notification.rb
     lib/powernode/models/operation.rb
     lib/powernode/models/provider.rb
     lib/powernode/models/provider_connection.rb
