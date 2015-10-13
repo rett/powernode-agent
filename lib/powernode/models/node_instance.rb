@@ -199,7 +199,7 @@ class NodeInstance
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
-      if address.empty?
+      unless address
         begin
           Powernode.logger.info "Allocating public IP for instance #{id}."
           address = compute.addresses.create
@@ -208,7 +208,7 @@ class NodeInstance
           Powernode.logger.error "Exception: #{e.message}."
         end
       end
-      if address.present?
+      if address
         begin
           ip = address.respond_to?(:public_ip) ? address.public_ip : address.ip
           if address.respond_to?(:allocation_id)
