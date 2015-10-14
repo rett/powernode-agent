@@ -24,8 +24,9 @@ class NodeModule
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
           operation.add_event!(:danger, "Error connecting to instance #{node_instance}\n#{e.message}")
+          operation.failed!
         end
-        if session
+        if session && operation.running?
           begin
             response = session.verbose_exec!("sudo ipn -e #{build_script_id} #{id} /tmp/#{id}.spec")
             output = response[:stdout]
@@ -55,14 +56,14 @@ class NodeModule
           end
         end
       end
-      true
+      operation.running?
     else
       false
     end
   end
 
   def do_commit(job = {})
-    if (operation.find(job['id'])) && (node_instance = NodeInstance.find(operation.options['node_instance_id']))
+    if (operation = Operation.find(job['id'])) && (node_instance = NodeInstance.find(operation.options['node_instance_id']))
       if rsync_spec.empty?
         operation.add_event!(:danger, "Commit aborted for module #{name}: No module specification")
       else
@@ -78,7 +79,7 @@ class NodeModule
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
-        operation.set_progress!(20)
+        operation.progress!(20)
         if File.directory?(tmp_dir)
           begin
             system *%W[sudo chown root:root #{tmp_dir}]
@@ -101,12 +102,12 @@ class NodeModule
           end
         end
         tmp_spec.unlink
-        operation.set_progress!(30)
+        operation.progress!(30)
         if File.directory?(tmp_dir)
           tmp_module = Tempfile.new([id, '.mo'])
           begin
             system *%W[sudo mksquashfs #{tmp_dir} #{tmp_module.path} -comp #{Powernode.config(:module_compression)} -noappend -no-progress]
-            operation.set_progress!(40)
+            operation.progress!(40)
           rescue => e
             Powernode.logger.error "Exception: #{e.message}."
           end
@@ -119,7 +120,7 @@ class NodeModule
               operation.add_event!(:danger, "Failed to commit #{name} from instance #{node_instance.name}")
             end
             FileUtils.remove_entry_secure(tmp_module, force: true)
-            operation.set_progress!(60)
+            operation.progress!(60)
             begin
               system *%W[sudo rm -rf #{tmp_dir}]
             rescue => e
