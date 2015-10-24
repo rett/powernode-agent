@@ -2,9 +2,12 @@
 id: 12345123-3456-012f-7654-1027e1212121
 key: secret_key
 server_url: http://localhost:3000
+enable_poller: false
+enable_proxy: false
 proxy_url:
 realm: Node Alchemy
 domain: example.com
+encryption_cipher: aes-256-cbc
 module_compression: xz
 checksum_bitlength: 256
 instance_key_length: 32

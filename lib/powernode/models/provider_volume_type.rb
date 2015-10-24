@@ -1,7 +1,7 @@
 class ProviderVolumeType
   include Her::Model
-
-  has_many :provider_volumes
-
   parse_root_in_json true
+
+  belongs_to :account
+  has_many :provider_volumes
 end

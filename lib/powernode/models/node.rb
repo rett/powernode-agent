@@ -1,5 +1,6 @@
 class Node
   include Her::Model
+  parse_root_in_json true
 
   belongs_to :account
   belongs_to :node_platform
@@ -8,8 +9,6 @@ class Node
   has_many :node_modules
 
   delegate :node_architecture, to: :node_template
-
-  parse_root_in_json true
 
   after_find :initialize_ssh_key
 
@@ -34,24 +33,24 @@ class Node
       command = 'maintenance'
       node_instances.each do |node_instance|
         if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
-          Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
+          Powernode.logger.info "Queued #{command} for instance #{node_instance.id}."
         end
       end
     elsif dynamic_instances.count > 0
       terminate_dynamic_instances!(dynamic_instances.count)
     end
+    true
   end
 
   def do_create_cloud_instance(job = {})
-    options = job['options']
-    if options.is_a?(Hash)
-      provider_connection_id        = options['provider_connection_id']
-      provider_availability_zone_id = options['provider_availability_zone_id']
-      provider_region_id            = options['provider_region_id']
-      provider_instance_type_id     = options['provider_instance_type_id']
-      provider_network_id           = options['provider_network_id']
-      provider_network_subnet_id    = options['provider_network_subnet_id']
-      variety                       = options['variety']
+    if (operation = Operation.find(job['id']))
+      provider_connection_id        = operation.options['provider_connection_id']
+      provider_availability_zone_id = operation.options['provider_availability_zone_id']
+      provider_region_id            = operation.options['provider_region_id']
+      provider_instance_type_id     = operation.options['provider_instance_type_id']
+      provider_network_id           = operation.options['provider_network_id']
+      provider_network_subnet_id    = operation.options['provider_network_subnet_id']
+      variety                       = operation.options['variety']
       provider_connection           = account.provider_connections.find(provider_connection_id)
       provider_region               = account.provider_regions.find(provider_region_id)                       if provider_region_id
       provider_availability_zone    = account.provider_availability_zones.find(provider_availability_zone_id) if provider_availability_zone_id
@@ -124,29 +123,26 @@ class Node
         Powernode.logger.info 'Account instance limit exceeded, refusing to create instance.'
       end
       if node_instance.try(:entity)
-        account.notifications.create(category: :notice, summary: "Successfully created #{node_instance.variety} instance #{node_instance.name}.")
+        operation.add_event!(:info, "Successfully created #{node_instance.variety} instance #{node_instance.name}.")
+        true
       else
-        account.notifications.create(category: :error, summary: 'Failed to create new instance!')
+        operation.add_event!(:danger, 'Failed to create new instance!')
+        false
       end
     end
   end
 
   def do_send_ssh_key(job = {})
-    options = job['options']
-    if options.is_a?(Hash)
-      recipient = options['recipient']
-      encryption_key = options['ssh_encryption_key']
+    if (operation = Operation.find(job['id']))
+      recipient = operation.options['recipient']
       Powernode.logger.info "Sending SSH key to #{recipient}."
-      if ssh_key && encryption_key && encryption_key.is_a?(String) && encryption_key.length == Powernode.config(:encryption_key_length)
-        encryption_key = [encryption_key].pack('H*')
-        cipher = OpenSSL::Cipher.new(Powernode.config(:encryption_cipher))
-        cipher.encrypt
-        cipher.key = encryption_key
-        iv = cipher.random_iv
-        encrypted_ssh_key = Base64.encode64(cipher.update(ssh_key_data.to_pem) + cipher.final)
-      else
-        encrypted_ssh_key = ssh_key_data.to_pem
-      end
+      encryption_key = operation.options['ssh_encryption_key']
+      encryption_key = [encryption_key].pack('H*')
+      cipher = OpenSSL::Cipher.new(Powernode.config(:encryption_cipher))
+      cipher.encrypt
+      cipher.key = encryption_key
+      iv = cipher.random_iv
+      encrypted_ssh_key = Base64.encode64(cipher.update(ssh_key_data.to_pem) + cipher.final)
       if ssh_key_data
         body = <<-EOF.strip_heredoc
           Attached is the encrypted SSH key for node #{name}.
@@ -168,22 +164,31 @@ class Node
                     subject: "SSH key for #{name}",
                     body: body,
                     attachments: { "#{name}.txt" => encrypted_ssh_key })
-          account.notifications.create(category: :notice, summary: "SSH key for #{name} delivered to #{recipient}")
+          operation.add_event!(:info, "SSH key for #{name} delivered to #{recipient}")
         rescue => e
+          operation.add_event!(:alert, "Exception: #{e.message}.")
           Powernode.logger.error "Exception: #{e.message}."
         end
       else
-        account.notifications.create(category: :alert, summary: "SSH key not found for node #{name}")
+        operation.add_event!(:alert, "SSH key not found for node #{name}")
       end
     end
+    true
   end
 
   def do_sync_cloud_instances(job = {})
     command = 'sync'
-    (cloud_instances + dynamic_instances).each do |node_instance|
-      if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
-        Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
+    if (operation = Operation.find(job['id']))
+      instances = (cloud_instances + dynamic_instances)
+      instances.each do |node_instance|
+        if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
+          Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
+        end
       end
+      operation.add_event!(:info, 'Cloud instance sync queued.')
+      true
+    else
+      false
     end
   end
 

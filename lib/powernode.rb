@@ -67,7 +67,7 @@ module Powernode
   end
 end
 
-Her::API.setup(url: Powernode.config(:server_url) + '/api/agent_v1', send_only_modified_attributes: true) do |connection|
+Her::API.setup(url: Powernode.config(:server_url) + '/api/agent_v1', send_only_modified_attributes: false) do |connection|
   connection.use Faraday::Request::BasicAuthentication, Powernode.config(:id), Powernode.config(:key)
   connection.use Faraday::Request::UrlEncoded
   connection.use Her::Middleware::DefaultParseJSON

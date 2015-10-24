@@ -1,13 +1,14 @@
 class ProviderConnection
   include Her::Model
+  include_root_in_json true
+  parse_root_in_json true
 
+  belongs_to :account
   belongs_to :provider
   has_many :node_instances
   has_many :operations
   has_many :provider_regions
   has_many :provider_volumes
-
-  parse_root_in_json true
 
   def compute(provider_region)
     begin

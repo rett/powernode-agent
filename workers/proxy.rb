@@ -97,4 +97,6 @@ class Proxy < Sinatra::Base
   end
 end
 
+Powernode.logger.warn "Proxy started."
 Proxy.run!
+Powernode.logger.warn "Proxy stopped."
