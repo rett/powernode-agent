@@ -12,9 +12,8 @@ class Store
                     expiration: Powernode.config(:store_job_expiration) })
 
   def perform(job)
-    @job = job
-    @node_module = NodeModule.find(@job['node_module_id'])
-    send("do_#{job['command']}") if job['command'] && respond_to?("perform_#{job['command']}")
+    @node_module = NodeModule.find(job['node_module_id'])
+    send("do_#{job['command']}") if job['command'] && respond_to?("do_#{job['command']}")
   end
 
   def do_transfer_module

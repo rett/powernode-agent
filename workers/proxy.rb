@@ -73,7 +73,7 @@ class Proxy < Sinatra::Base
 
   route :get, :post, '/api/node_v1/*' do |path|
     begin
-      method = request.env["REQUEST_METHOD"].gsub(/\W/, '').downcase.to_sym
+      method = request.env['REQUEST_METHOD'].gsub(/\W/, '').downcase.to_sym
       node_api.send(method) { |request| request.url params[:splat].join }.body
     end
   end
@@ -97,6 +97,6 @@ class Proxy < Sinatra::Base
   end
 end
 
-Powernode.logger.warn "Proxy started."
+Powernode.logger.warn 'Proxy started.'
 Proxy.run!
-Powernode.logger.warn "Proxy stopped."
+Powernode.logger.warn 'Proxy stopped.'
