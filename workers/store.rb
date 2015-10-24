@@ -14,10 +14,10 @@ class Store
   def perform(job)
     @job = job
     @node_module = NodeModule.find(@job['node_module_id'])
-    send("perform_#{job['command']}") if job['command'] && respond_to?("perform_#{job['command']}")
+    send("do_#{job['command']}") if job['command'] && respond_to?("perform_#{job['command']}")
   end
 
-  def perform_transfer_module
+  def do_transfer_module
     Powernode.logger.info "Attempting to download #{@node_module.data_file_name}"
     module_dir = File.join(Powernode.config(:module_dir), @node_module.uuid_partition)
     module_file = File.join(module_dir, @node_module.data_file_name)
