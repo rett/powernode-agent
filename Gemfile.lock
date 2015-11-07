@@ -65,7 +65,7 @@ GEM
       fog-xml (~> 0.1.1)
       ipaddress (~> 0.5)
       nokogiri
-    fog-aliyun (0.0.10)
+    fog-aliyun (0.1.0)
       fog-core (~> 1.27)
       fog-json (~> 1.0)
       ipaddress (~> 0.8)
@@ -192,8 +192,8 @@ GEM
       redis (~> 3.0, >= 3.0.4)
     redis-objects (1.2.1)
       redis (>= 3.0.2)
-    sidekiq (3.0.2)
-      celluloid (>= 0.15.2)
+    sidekiq (3.2.6)
+      celluloid (= 0.15.2)
       connection_pool (>= 2.0.0)
       json
       redis (>= 3.0.6)
@@ -259,7 +259,7 @@ DEPENDENCIES
   pony
   rake
   redis-objects
-  sidekiq (~> 3.0.0)
+  sidekiq (< 5)
   sidekiq-middleware
   sidekiq-status
   sinatra
