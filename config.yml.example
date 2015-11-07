@@ -56,7 +56,6 @@ ssh_key_dir: /opt/powernode/keys
 ssh_port: 22
 
 # Redis options
-redis_namespace: alchemy
 redis_server: redis://localhost:6379/0
 
 # Node Poller options

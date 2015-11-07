@@ -123,7 +123,7 @@ class Node
         Powernode.logger.info 'Account instance limit exceeded, refusing to create instance.'
       end
       if node_instance.try(:entity)
-        operation.add_event!(:info, "Successfully created #{node_instance.variety} instance #{node_instance.name}.")
+        operation.add_event!(:info, "Created #{node_instance.variety} instance #{node_instance.name}.")
         true
       else
         operation.add_event!(:danger, 'Failed to create new instance!')
@@ -185,7 +185,6 @@ class Node
           Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
         end
       end
-      operation.add_event!(:info, 'Cloud instance sync queued.')
       true
     else
       false
