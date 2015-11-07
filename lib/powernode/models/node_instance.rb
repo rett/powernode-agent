@@ -49,6 +49,22 @@ class NodeInstance
     true
   end
 
+  def do_cleanse(job = {})
+    if (operation = Operation.find(job['id']))
+      Powernode.logger.info "Cleansing instance #{id}."
+      if ssh_ip_address && ssh_key && ssh_key_file
+        operation.progress!(50)
+        begin
+          session = Net::SSH.start(ssh_ip_address, admin_user, key_data: ssh_key, paranoid: false)
+          session.exec!('sudo /usr/sbin/ipn -C')
+        rescue => e
+          Powernode.logger.error "Exception: #{e.message}."
+        end
+        operation.progress!(100)
+      end
+    end
+  end
+
   def do_create_image(job = {})
     if (operation = Operation.find(job['id']))
       image_format = job['options']['image_format']
@@ -147,14 +163,13 @@ class NodeInstance
       if image_file && image_file.size > 0
         payload = { image_format: image_format, image: Faraday::UploadIO.new(image_file.path, 'application/octet-stream') }
         response = Powernode.server.post("node_instances/#{id}/upload/image", payload)
-        if response.status == 200
-          operation.add_event!(:info, "#{image_format.upcase} image created for instance #{name}.")
-        else
+        unless response.status == 200
           operation.add_event!(:danger, "Failed to create #{image_format.upcase} image for instance #{name}.")
         end
       end
       FileUtils.remove_entry_secure(image_file)
       FileUtils.remove_entry_secure(image_dir)
+      operation.progress!(100)
     end
   end
 
@@ -181,6 +196,7 @@ class NodeInstance
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
+      operation.progress!(100)
     end
     response
   end
@@ -221,6 +237,7 @@ class NodeInstance
           Powernode.logger.error "Exception: #{e.message}."
         end
         save
+        operation.progress!(100)
       end
     end
   end
@@ -243,7 +260,7 @@ class NodeInstance
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
-        operation.add_event!(:info, "Disassociated IP #{address} from instance #{name}.")
+        operation.progress!(100)
       end
     end
   end
@@ -254,10 +271,10 @@ class NodeInstance
       operation.progress!(50)
       begin
         instance.reboot
-        operation.add_event!(:info, "Instance #{name} rebooting.")
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
+      operation.progress!(100)
     end
   end
 
@@ -267,10 +284,10 @@ class NodeInstance
       operation.progress!(50)
       begin
         instance.start
-        operation.add_event!(:info, "Instance #{name} starting.")
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
+      operation.progress!(100)
     end
   end
 
@@ -280,25 +297,25 @@ class NodeInstance
       operation.progress!(50)
       begin
         instance.stop
-        operation.add_event!(:info, "Instance #{name} stopping.")
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
+      operation.progress!(100)
     end
   end
 
   def do_sync(job = {})
     if (operation = Operation.find(job['id']))
       Powernode.logger.info "Syncing instance #{id}."
-      operation.progress!(50)
       if ssh_ip_address && ssh_key && ssh_key_file
+        operation.progress!(50)
         begin
           session = Net::SSH.start(ssh_ip_address, admin_user, key_data: ssh_key, paranoid: false)
           session.exec!('sudo /usr/sbin/ipn -S')
-          operation.add_event!(:info, "Instance #{name} synced.")
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
+        operation.progress!(100)
       end
     end
   end
@@ -312,7 +329,7 @@ class NodeInstance
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
       end
-      operation.add_event!(:info, "Instance #{name} terminated.")
+      operation.progress!(100)
     end
   end
 
