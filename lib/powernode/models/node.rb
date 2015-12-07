@@ -10,8 +10,6 @@ class Node
 
   delegate :node_architecture, to: :node_template
 
-  after_find :initialize_ssh_key
-
   def cloud_instances
     node_instances.where(variety: 'cloud')
   end
@@ -132,50 +130,6 @@ class Node
     end
   end
 
-  def do_send_ssh_key(job = {})
-    if (operation = Operation.find(job['id']))
-      recipient = operation.options['recipient']
-      Powernode.logger.info "Sending SSH key to #{recipient}."
-      encryption_key = operation.options['ssh_encryption_key']
-      encryption_key = [encryption_key].pack('H*')
-      cipher = OpenSSL::Cipher.new(Powernode.config(:encryption_cipher))
-      cipher.encrypt
-      cipher.key = encryption_key
-      iv = cipher.random_iv
-      encrypted_ssh_key = Base64.encode64(cipher.update(ssh_key_data.to_pem) + cipher.final)
-      if ssh_key_data
-        body = <<-EOF.strip_heredoc
-          Attached is the encrypted SSH key for node #{name}.
-
-          You must decrypt the ssh key with the following command:
-          $ openssl #{Powernode.config(:encryption_cipher)} -base64 -d -in "#{name}.txt" -out "#{name}.pem" -iv #{iv.unpack('H*')[0]} -K [encryption key]
-
-          Change the file permissions:
-          $ chmod 600 #{name}.pem
-
-          SSH in to an instance by specifying the private key:
-          $ ssh -i #{name}.pem #{admin_user}@[ip address]
-
-          Thanks,
-          Node Alchemy
-        EOF
-        begin
-          Pony.mail(to: recipient,
-                    subject: "SSH key for #{name}",
-                    body: body,
-                    attachments: { "#{name}.txt" => encrypted_ssh_key })
-          operation.add_event!(:info, "SSH key for #{name} delivered to #{recipient}")
-        rescue => e
-          operation.add_event!(:alert, "Exception: #{e.message}.")
-          Powernode.logger.error "Exception: #{e.message}."
-        end
-      else
-        operation.add_event!(:alert, "SSH key not found for node #{name}")
-      end
-    end
-    true
-  end
-
   def do_sync_cloud_instances(job = {})
     command = 'sync'
     if (operation = Operation.find(job['id']))
@@ -192,14 +146,7 @@ class Node
   end
 
   def ssh_key_data
-    unless @ssh_key_data
-      if ssh_key.present?
-        @ssh_key_data = OpenSSL::PKey::RSA.new(ssh_key)
-      else
-        @ssh_key_data = OpenSSL::PKey::RSA.new(2048)
-      end
-    end
-    @ssh_key_data
+    @ssh_key_data ||= OpenSSL::PKey::RSA.new(ssh_key)
   end
 
   def ssh_key_file
@@ -232,14 +179,6 @@ class Node
         running_jobs.delete(running_job) if [:complete, :failed, nil].include?(status)
         sleep 1
       end
-    end
-  end
-
-  def initialize_ssh_key
-    if ssh_key != ssh_key_data.to_pem || ssh_key_fingerprint != ssh_key_data.fingerprint
-      self.ssh_key = ssh_key_data.to_pem
-      self.ssh_key_fingerprint = ssh_key_data.fingerprint
-      self.save
     end
   end
 end
