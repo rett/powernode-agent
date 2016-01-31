@@ -12,11 +12,12 @@ class NodeInstance
   has_many :operations
   has_many :provider_network_ips
 
-  delegate :account, to: :node
-  delegate :admin_user, to: :node
-  delegate :ssh_key, to: :node
-  delegate :ssh_key_data, to: :node
-  delegate :ssh_key_file, to: :node
+  delegate :account,            to: :node
+  delegate :admin_user,         to: :node
+  delegate :node_architecture,  to: :node
+  delegate :ssh_key,            to: :node
+  delegate :ssh_key_data,       to: :node
+  delegate :ssh_key_file,       to: :node
 
   def compute
     provider_connection.compute(provider_region)
@@ -42,15 +43,12 @@ class NodeInstance
     when 'physical'
       netboot_sync if private_netboot_enabled?
     end
-    case status
-    when 'terminated'
-      self.destroy
-    end
-    true
+    self.destroy if status == 'terminated'
   end
 
   def do_cleanse(job = {})
     if (operation = Operation.find(job['id']))
+      operation.running!
       Powernode.logger.info "Cleansing instance #{id}."
       if ssh_ip_address && ssh_key && ssh_key_file
         operation.progress!(50)
@@ -59,16 +57,18 @@ class NodeInstance
           session.exec!('sudo /usr/sbin/ipn -C')
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
+          operation.failed!
         end
-        operation.progress!(100)
       end
+      operation.complete! unless operation.failed?
     end
   end
 
   def do_create_image(job = {})
     if (operation = Operation.find(job['id']))
-      image_format = job['options']['image_format']
+      operation.running!
       Powernode.logger.info "Creating #{image_format} image for instance #{id}."
+      image_format = job['options']['image_format']
       image_dir = node.node_architecture.image_prepare!
       node_identity_file = File.join(image_dir, 'identity.cfg')
       begin
@@ -80,148 +80,148 @@ class NodeInstance
         end
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
+        operation.failed!("Failed to create #{image_format.upcase} image for instance #{name}.")
       end
-      node_config_file = File.join(image_dir, 'node.cfg')
-      begin
-        File.open(node_config_file, File::RDWR|File::CREAT, 0644) do |f|
-          f.flock(File::LOCK_EX)
-          f.puts(config)
-          f.flush
-          f.truncate(f.pos)
-          operation.progress!(20)
-        end
-      rescue => e
-        Powernode.logger.error "Exception: #{e.message}."
-      end
-      FileUtils.mkdir_p(File.join(image_dir, 'boot', 'syslinux'))
-      syslinux_cfg_file = File.join(image_dir, 'boot', 'syslinux', 'syslinux.cfg')
-      append = ''
-      if private_ip_static
-        if private_ip_address.present?
-          append += "ip=#{private_ip_address}:" +
-              ":" +
-              "#{private_ip_gateway}:" +
-              "#{private_ip_netmask}:" +
-              "#{name}:" +
-              "#{private_ip_device}:" +
-              "off "
-        end
-      end
-      append += "HOSTNAME=#{name} "
-      append += "DNS_PRIMARY=#{private_ip_primary_dns} " if private_ip_primary_dns.present?
-      append += "DNS_SECONDARY=#{private_ip_secondary_dns} " if private_ip_secondary_dns.present?
-      append += "DNS_DOMAIN=#{private_ip_domain} " if private_ip_domain.present?
-      begin
-        File.open(syslinux_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
-          f.flock(File::LOCK_EX)
-          f << "DEFAULT alchemy\n" +
-               "LABEL alchemy\n" +
-               "LINUX /boot/kernel\n" +
-               "INITRD /boot/ramdisk\n" +
-               "APPEND #{append}\n"
-          f.flush
-          f.truncate(f.pos)
-          operation.progress!(40)
-        end
-      end
-      case image_format
-      when 'img'
+      if operation.running?
+        node_config_file = File.join(image_dir, 'node.cfg')
         begin
-          image_file = Tempfile.new([id, '.img'])
-          image_file_size = (`sudo du -bs #{image_dir} | cut -f1`.to_i * 1.15).to_i
-          image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
-          image_dir_mount = Dir.mktmpdir
-          system *%W[sudo dd if=/dev/zero of=#{image_file.path} bs=#{Powernode.config(:image_blocksize).to_i} count=#{image_file_blocks}]
-          system *%W[sudo mkfs.ext4 -F #{image_file.path}]
-          system *%W[sudo mount -o loop #{image_file.path} #{image_dir_mount}]
-          image_dir_device = `sudo losetup -j #{image_file.path}`.split(':').first
-          system *%W[sudo cp -a #{File.join(image_dir, '.')} #{image_dir_mount}]
-          system *%W[sudo dd bs=440 conv=notrunc count=1 if=/usr/lib/syslinux/mbr.bin of=#{image_dir_device}]
-          system *%W[sudo extlinux --install #{image_dir_mount}/boot]
-          system *%W[sudo umount -l #{image_dir_device}]
-          FileUtils.remove_entry_secure(image_dir_mount)
-          operation.progress!(50)
+          File.open(node_config_file, File::RDWR|File::CREAT, 0644) do |f|
+            f.flock(File::LOCK_EX)
+            f.puts(config)
+            f.flush
+            f.truncate(f.pos)
+            operation.progress!(20)
+          end
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
-        end
-      when 'iso'
-        begin
-          FileUtils.cp('/usr/lib/syslinux/isolinux.bin', File.join(image_dir, 'boot'))
-        rescue => e
-          Powernode.logger.error "Exception: #{e.message}."
-        end
-        begin
-          image_file = Tempfile.new([id, '.img'])
-          system *%W[sudo mkisofs -o #{image_file.path} -V #{name} -b boot/isolinux.bin -c boot/syslinux/boot.cat -r -J -l -quiet -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{image_dir}]
-          operation.progress!(60)
-          system *%W[sudo isohybrid #{image_file.path} --entry 1 --type 0x83]
-          operation.progress!(80)
-        rescue => e
-          Powernode.logger.error "Exception: #{e.message}."
+          operation.failed!("Failed to create #{image_format.upcase} image for instance #{name}.")
         end
       end
-      if image_file && image_file.size > 0
+      if operation.running?
+        FileUtils.mkdir_p(File.join(image_dir, 'boot', 'syslinux'))
+        syslinux_cfg_file = File.join(image_dir, 'boot', 'syslinux', 'syslinux.cfg')
+        append = node_architecture.kernel_options
+        if private_ip_static
+          if private_ip_address.present?
+            append += " ip=#{private_ip_address}:" +
+                ":" +
+                "#{private_ip_gateway}:" +
+                "#{private_ip_netmask}:" +
+                "#{name}:" +
+                "#{private_ip_device}:" +
+                "off "
+          end
+        end
+        append += "HOSTNAME=#{name} "
+        append += "DNS_PRIMARY=#{private_ip_primary_dns} " if private_ip_primary_dns.present?
+        append += "DNS_SECONDARY=#{private_ip_secondary_dns} " if private_ip_secondary_dns.present?
+        begin
+          File.open(syslinux_cfg_file, File::RDWR|File::CREAT, 0644) do |f|
+            f.flock(File::LOCK_EX)
+            f << "DEFAULT alchemy\n" +
+                 "LABEL alchemy\n" +
+                 "LINUX /boot/kernel\n" +
+                 "INITRD /boot/ramdisk\n" +
+                 "APPEND #{append}\n"
+            f.flush
+            f.truncate(f.pos)
+            operation.progress!(40)
+          end
+        rescue => e
+          Powernode.logger.error "Exception: #{e.message}."
+          operation.failed!("Failed to create #{image_format.upcase} image for instance #{name}.")
+        end
+      end
+      if operation.running?
+        case image_format
+        when 'img'
+          begin
+            image_file = Tempfile.new([id, '.img'])
+            image_file_size = (`sudo du -bs #{image_dir} | cut -f1`.to_i * 1.15).to_i
+            image_file_blocks = image_file_size / Powernode.config(:image_blocksize).to_i
+            image_dir_mount = Dir.mktmpdir
+            system *%W[sudo dd if=/dev/zero of=#{image_file.path} bs=#{Powernode.config(:image_blocksize).to_i} count=#{image_file_blocks}]
+            system *%W[sudo mkfs.ext4 -F #{image_file.path}]
+            system *%W[sudo mount -o loop #{image_file.path} #{image_dir_mount}]
+            image_dir_device = `sudo losetup -j #{image_file.path}`.split(':').first
+            system *%W[sudo cp -a #{File.join(image_dir, '.')} #{image_dir_mount}]
+            system *%W[sudo dd bs=440 conv=notrunc count=1 if=/usr/lib/syslinux/mbr.bin of=#{image_dir_device}]
+            system *%W[sudo extlinux --install #{image_dir_mount}/boot]
+            system *%W[sudo umount -l #{image_dir_device}]
+            FileUtils.remove_entry_secure(image_dir_mount)
+            operation.progress!(50)
+          rescue => e
+            Powernode.logger.error "Exception: #{e.message}."
+            operation.failed!("Failed to create #{image_format.upcase} image for instance #{name}.")
+          end
+        when 'iso'
+          begin
+            FileUtils.cp('/usr/lib/syslinux/isolinux.bin', File.join(image_dir, 'boot'))
+            image_file = Tempfile.new([id, '.img'])
+            system *%W[sudo mkisofs -o #{image_file.path} -V #{name} -b boot/isolinux.bin -c boot/syslinux/boot.cat -r -J -l -quiet -relaxed-filenames -no-emul-boot -boot-load-size 4 -boot-info-table #{image_dir}]
+            operation.progress!(60)
+            system *%W[sudo isohybrid #{image_file.path} --entry 1 --type 0x83]
+            operation.progress!(80)
+          rescue => e
+            Powernode.logger.error "Exception: #{e.message}."
+            operation.failed!("Failed to create #{image_format.upcase} image for instance #{name}.")
+          end
+        end
+      end
+      if image_file && image_file.size > 0 && operation.running?
         payload = { image_format: image_format, image: Faraday::UploadIO.new(image_file.path, 'application/octet-stream') }
         response = Powernode.server.post("node_instances/#{id}/upload/image", payload)
         unless response.status == 200
-          operation.add_event!(:danger, "Failed to create #{image_format.upcase} image for instance #{name}.")
+          operation.failed!("Failed to create #{image_format.upcase} image for instance #{name}.")
         end
       end
-      FileUtils.remove_entry_secure(image_file)
+      FileUtils.remove_entry_secure(image_file) if image_file
       FileUtils.remove_entry_secure(image_dir)
-      operation.progress!(100)
     end
+    operation.complete! unless operation.failed?
   end
 
   def do_exec(job = {})
     if (operation = Operation.find(job['id']))
-      operation.progress!(10)
       Powernode.logger.info "Executing (#{job['options']['exec']}) on #{name}."
+      operation.running!
       begin
         session = Net::SSH.start(ssh_ip_address, node.admin_user, key_data: key.to_pem, paranoid: false)
-      rescue => e
-        Powernode.logger.error "Exception: #{e.message}."
-      end
-      response = ''
-      operation.progress!(20)
-      begin
+        operation.progress!(20)
         session.open_channel do |channel|
-          channel.exec("sudo #{job['options']['exec']}") do |ch, success|
-            channel.on_data do |ch, data|
-              response = data
-            end
-          end
+          channel.exec("sudo #{job['options']['exec']}")
         end
         session.loop
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
+        operation.failed!("Failed to execute #{job['options']['exec']} on #{name}.")
       end
-      operation.progress!(100)
     end
-    response
+    operation.complete! unless operation.failed?
   end
 
   def do_public_ip_associate(job = {})
     if (operation = Operation.find(job['id']))
       Powernode.logger.info "Associating public IP for instance #{id}."
+      operation.running!
       begin
         Powernode.logger.info "Searching for unallocated public IP for instance #{id}."
-        case provider_connection.variety
-        when 'aws'
+        if provider_connection.variety == 'aws'
           address = [compute.addresses.find { |a| !a.server_id && a.domain == 'vpc' }].first
         else
           address = [compute.addresses.find { |a| !a.instance_id }].first
         end
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
+        operation.failed!("Unable to associate IP for instance #{name}.")
       end
       unless address
         begin
           Powernode.logger.info "Allocating public IP for instance #{id}."
           address = compute.addresses.create
         rescue => e
-          operation.add_event!(:danger, "Unable to allocate IP for instance #{name}: #{e.message}")
           Powernode.logger.error "Exception: #{e.message}."
+          operation.failed!("Unable to associate IP for instance #{name}.")
         end
       end
       if address
@@ -235,22 +235,25 @@ class NodeInstance
           self.public_ip_address = ip
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
+          operation.failed!("Unable to associate IP for instance #{name}.")
         end
         save
-        operation.progress!(100)
       end
+      operation.complete! unless operation.failed?
     end
   end
 
   def do_public_ip_disassociate(job = {})
     if (operation = Operation.find(job['id']))
+      Powernode.logger.info "Disassociating public IP for instance #{id}."
+      operation.running!
       begin
         address = compute.addresses.find { |a| a.respond_to?(:public_ip) ? a.public_ip == public_ip_address : a.ip == public_ip_address }
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
+        operation.failed!("Unable to disassociate IP for instance #{name}.")
       end
       if address.present?
-        Powernode.logger.info "Disassociating public IP for instance #{id}."
         begin
           if address.respond_to?(:association_id)
             instance.service.disassociate_address(nil, address.association_id)
@@ -259,63 +262,66 @@ class NodeInstance
           end
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
+          operation.failed!("Unable to disassociate IP for instance #{name}.")
         end
-        operation.progress!(100)
       end
+      operation.complete! unless operation.failed?
     end
   end
 
   def do_reboot(job = {})
     if (operation = Operation.find(job['id']))
-      Powernode.logger.info "Rebooting instance #{id}."
-      operation.progress!(50)
+      operation.running!
       begin
         instance.reboot
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
+        operation.failed!("Failed to reboot instance #{name}.")
       end
-      operation.progress!(100)
+      operation.complete! unless operation.failed?
     end
   end
 
   def do_start(job = {})
     if (operation = Operation.find(job['id']))
-      Powernode.logger.info "Starting instance #{id}."
-      operation.progress!(50)
+      operation.running!
       begin
         instance.start
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
+        operation.failed!("Failed to start instance #{name}.")
       end
-      operation.progress!(100)
+      operation.complete! unless operation.failed?
     end
   end
 
   def do_stop(job = {})
     if (operation = Operation.find(job['id']))
       Powernode.logger.info "Stopping instance #{id}."
-      operation.progress!(50)
+      operation.running!
       begin
         instance.stop
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
+        operation.failed!("Failed to stop instance #{name}.")
       end
-      operation.progress!(100)
+      operation.complete! unless operation.failed?
     end
   end
 
   def do_sync(job = {})
     if (operation = Operation.find(job['id']))
       Powernode.logger.info "Syncing instance #{id}."
+      operation.running!
       if ssh_ip_address && ssh_key && ssh_key_file
-        operation.progress!(50)
         begin
           session = Net::SSH.start(ssh_ip_address, admin_user, key_data: ssh_key, paranoid: false)
           session.exec!('sudo /usr/sbin/ipn -S')
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
+          operation.failed!("Failed to sync instance #{name}.")
         end
-        operation.progress!(100)
+        operation.complete! unless operation.failed?
       end
     end
   end
@@ -323,13 +329,14 @@ class NodeInstance
   def do_terminate(job = {})
     if (operation = Operation.find(job['id'])) && instance
       Powernode.logger.info "Terminating instance #{id}."
-      operation.progress!(50)
+      operation.running!
       begin
         self.instance.destroy
       rescue => e
         Powernode.logger.error "Exception: #{e.message}."
+        operation.failed!("Failed to terminate instance #{name}.")
       end
-      operation.progress!(100)
+      operation.complete! unless operation.failed?
     end
   end
 
@@ -372,12 +379,11 @@ class NodeInstance
   end
 
   def netboot_sync
-    sleep 1 until node.node_architecture.init_sync!
+    sleep Powernode.config(:job_interval) until node.node_architecture.init_sync!
     init_dir = Powernode.config(:init_dir)
     pxelinux_dir = File.join(init_dir, 'pxelinux.cfg')
     FileUtils.mkdir_p(pxelinux_dir) unless Dir.exist?(pxelinux_dir)
     if private_netboot_enabled? && private_mac_address.present?
-      Powernode.logger.info "Synchronizing netboot config for instance #{id}."
       netboot_cfg_file = File.join(pxelinux_dir, private_mac_address)
       if File.exist?(netboot_cfg_file)
         file_updated_at = open(netboot_cfg_file, 'r') { |f| f.each_line.find { |line| line.include?('# Updated: ') }.try(:match, /(\d\d\d\d)-(\d\d)-(\d\d)T(.*)-(\d\d):(\d\d)/) }
@@ -395,7 +401,7 @@ class NodeInstance
                 "LABEL alchemy\n" +
                 "LINUX /boot/#{kernel_file_name}\n" +
                 "INITRD /boot/#{ramdisk_file_name}\n" +
-                "APPEND #{identity_parameters} "
+                "APPEND #{node_architecture.kernel_options} #{identity_parameters} "
             if private_ip_static
               f << "ip=" +
                   "#{private_ip_address}:" +
@@ -406,8 +412,7 @@ class NodeInstance
                   "#{private_ip_device}:" +
                   "off " +
                   "DNS_PRIMARY=#{private_ip_primary_dns} " +
-                  "DNS_SECONDARY=#{private_ip_secondary_dns} " +
-                  "DNS_DOMAIN=#{private_ip_domain}\n"
+                  "DNS_SECONDARY=#{private_ip_secondary_dns}\n"
             else
               f << "\n"
             end

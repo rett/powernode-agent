@@ -59,6 +59,7 @@ ssh_port: 22
 redis_server: redis://localhost:6379/0
 
 # Node Poller options
+job_interval: <%= 5.seconds %>
 poller_interval: <%= 10.seconds %>
 
 # Node Proxy options

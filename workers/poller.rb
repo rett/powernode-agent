@@ -9,9 +9,7 @@ class Poller
     begin
       command = 'maintenance'
       Account.all.each do |account|
-        if Agent.perform_async({ command: command, operable_type: 'account', operable_id: account.id })
-          Powernode.logger.info "Queued #{command} for account #{account.id}."
-        end
+        Agent.perform_async({ command: command, operable_type: 'account', operable_id: account.id })
       end
     rescue => e
       Powernode.logger.error "Exception: #{e.message}."

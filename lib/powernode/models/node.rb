@@ -30,18 +30,16 @@ class Node
     if enabled?
       command = 'maintenance'
       node_instances.each do |node_instance|
-        if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
-          Powernode.logger.info "Queued #{command} for instance #{node_instance.id}."
-        end
+        Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
       end
     elsif dynamic_instances.count > 0
       terminate_dynamic_instances!(dynamic_instances.count)
     end
-    true
   end
 
   def do_create_cloud_instance(job = {})
     if (operation = Operation.find(job['id']))
+      operation.running!
       provider_connection_id        = operation.options['provider_connection_id']
       provider_availability_zone_id = operation.options['provider_availability_zone_id']
       provider_region_id            = operation.options['provider_region_id']
@@ -94,6 +92,7 @@ class Node
           cloud_instance.wait_for { state != 'pending' }
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
+          operation.failed!("Failed to create new instance for node #{name}.")
         end
         if cloud_instance
           node_instance.entity = cloud_instance.id
@@ -113,35 +112,32 @@ class Node
               provider.compute.servers.destroy(cloud_instance.id)
             rescue => e
               Powernode.logger.error "Exception: #{e.message}."
+              operation.failed!("Failed to create new instance for node #{name}")
             end
             node_instance.entity = nil
           end
         end
       else
-        Powernode.logger.info 'Account instance limit exceeded, refusing to create instance.'
+        operation.failed!('Account instance limit exceeded, refusing to create instance.')
       end
       if node_instance.try(:entity)
         operation.add_event!(:info, "Created #{node_instance.variety} instance #{node_instance.name}.")
-        true
-      else
-        operation.add_event!(:danger, 'Failed to create new instance!')
-        false
       end
+      operation.complete! unless operation.failed?
     end
   end
 
   def do_sync_cloud_instances(job = {})
     command = 'sync'
     if (operation = Operation.find(job['id']))
+      operation.running!
       instances = (cloud_instances + dynamic_instances)
       instances.each do |node_instance|
         if Agent.perform_async({ command: command, operable_type: 'node_instance', operable_id: node_instance.id })
           Powernode.logger.info "Queued #{command} for node instance #{node_instance.id}."
         end
       end
-      true
-    else
-      false
+      operation.complete!
     end
   end
 
@@ -169,15 +165,13 @@ class Node
     command = 'create_instance'
     running_jobs = []
     count.times do
-      if running_jobs << Agent.perform_async({ command: command, operable_type: 'node', operable_id: id, options: { 'variety' => variety }, unique: UUIDTools::UUID.timestamp_create })
-        Powernode.logger.info "Queued #{command} for node #{id}."
-      end
+      running_jobs << Agent.perform_async({ command: command, operable_type: 'node', operable_id: id, options: { 'variety' => variety }, unique: UUIDTools::UUID.timestamp_create })
     end
     while running_jobs.size > 0
       running_jobs.each do |running_job|
         status = Sidekiq::Status::status(running_job)
         running_jobs.delete(running_job) if [:complete, :failed, nil].include?(status)
-        sleep 1
+        sleep Powernode.config(:job_interval)
       end
     end
   end

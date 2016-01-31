@@ -38,13 +38,13 @@ class Operation
     self.save
   end
 
-  def failed!
+  def failed!(details = nil)
+    self.events << { details: details, variety: :danger } if details
     self.status = 'failed'
     self.save
   end
 
-  def running!(p = 0)
-    self.progress = p
+  def running!
     self.status = 'running'
     self.save
   end

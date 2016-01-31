@@ -37,9 +37,9 @@ class NodeArchitecture
       end
       FileUtils.remove_entry_secure(image_file)
       FileUtils.remove_entry_secure(image_dir)
+      operation.complete! unless operation.failed?
     end
   end
-
 
   def init_sync!
     init_dir = Powernode.config(:init_dir)
@@ -70,7 +70,7 @@ class NodeArchitecture
   end
 
   def image_prepare!
-    sleep 1 until init_sync!
+    sleep Powernode.config(:job_interval) until init_sync!
     init_dir = Powernode.config(:init_dir)
     begin
       FileUtils.mkdir_p(init_dir) unless Dir.exist?(init_dir)
@@ -98,7 +98,7 @@ class NodeArchitecture
              "LABEL Node_Alchemy_Init\n" +
              "LINUX /boot/kernel\n" +
              "INITRD /boot/ramdisk\n" +
-             "APPEND console=tty0 console=ttyS0,115200n8\n"
+             "APPEND #{kernel_options}\n"
         f.flush
         f.truncate(f.pos)
       end
