@@ -74,7 +74,7 @@ class NodeModule
             f.write(rsync_spec)
           end
           system *%W[sudo chown root:root #{tmp_dir}]
-          system %Q[sudo rsync -arqH --numeric-ids -e "ssh -t -q -p #{Powernode.config(:ssh_port)} -o PasswordAuthentication=no -i #{node_instance.ssh_key_file}" --rsync-path="sudo rsync" --include-from=#{tmp_spec.path} #{node_instance.admin_user}@#{node_instance.ssh_ip_address}:/ #{tmp_dir}/]
+          system %Q[sudo rsync -arqH --numeric-ids -e "ssh -t -q -p #{Powernode.config(:ssh_port)} -o PasswordAuthentication=no -o StrictHostKeyChecking=no -i #{node_instance.ssh_key_file}" --rsync-path="sudo rsync" --include-from=#{tmp_spec.path} #{node_instance.admin_user}@#{node_instance.ssh_ip_address}:/ #{tmp_dir}/]
         rescue => e
           Powernode.logger.error "Exception: #{e.message}."
         end
