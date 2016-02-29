@@ -11,8 +11,6 @@ class NodeModule
         operation.failed!('Build aborted: No package specification')
       elsif !node_instance
         operation.failed!("Build aborted: Node instance #{node_instance.name} not available.")
-      elsif node_instance.status != 'active'
-        operation.failed!("Build aborted: Node instance #{node_instance.name} not active.")
       else
         Powernode.logger.info "Building module #{id} on instance #{node_instance.id}."
         operation.progress!(20)
@@ -64,8 +62,6 @@ class NodeModule
         operation.failed!('Commit aborted: No file specification.')
       elsif !node_instance
         operation.failed!('Commit aborted: Node instance not available.')
-      elsif node_instance.status != 'active'
-        operation.failed!('Commit aborted: Node instance not active.')
       else
         Powernode.logger.info "Committing module #{id} on instance #{node_instance.id}."
         operation.progress!(20)
